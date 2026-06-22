@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ritmo-game</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; min-height: 100vh; display: grid; place-items: center;
+        font-family: ui-monospace, "Cascadia Code", "SFMono-Regular", monospace;
+        background: radial-gradient(120% 120% at 50% 0%, #16162a 0%, #0a0a12 60%);
+        color: #e7e7ef;
+      }
+      .panel { text-align: center; width: min(92vw, 440px); padding: 1rem 0 3rem; }
+      h1 { margin: 0 0 .2rem; letter-spacing: .06em; }
+      .sub { opacity: .55; margin: 0 0 1.2rem; font-size: .82rem; }
+      button {
+        font: inherit; padding: .8rem 2rem; border: 0; border-radius: 999px;
+        background: #6c5ce7; color: #fff; cursor: pointer; font-weight: 700;
+      }
+      button:disabled { opacity: .45; cursor: default; }
+      button.ghost { background: transparent; border: 1.5px solid #6c5ce7; color: #b9adff; }
+      button.selected { background: #6c5ce7; color: #fff; border-color: #6c5ce7; }
+      button.small { padding: .35rem .7rem; font-size: .8rem; }
+      .nav { display: flex; gap: .5rem; justify-content: center; margin-bottom: 1.1rem; }
+      .buttons { display: flex; gap: .6rem; justify-content: center; flex-wrap: wrap; }
+      .songs { display: flex; gap: .5rem; justify-content: center; flex-wrap: wrap; margin-bottom: .8rem; }
+      .status { min-height: 1.3rem; margin-top: .9rem; font-size: .84rem; color: #b9adff; }
+      .hidden { display: none !important; }
+
+      /* sync manual */
+      .sync-panel { margin-top: .8rem; display: grid; gap: .35rem; }
+      .sync-row { font-size: .85rem; color: #9a93c9; }
+      .sync-panel b { color: #8c7bff; }
+      .sync {
+        display: flex; gap: .5rem; align-items: center; justify-content: center;
+        margin-top: .8rem; font-size: .8rem; color: #9a93c9;
+      }
+      .sync b { color: #8c7bff; min-width: 64px; }
+
+      /* editor */
+      .editor { margin-top: 1rem; display: grid; gap: .7rem; justify-items: center; }
+      .editor-hint { font-size: .82rem; color: #b9adff; min-height: 1.2rem; max-width: 360px; }
+      .editor label { font-size: .82rem; color: #b9adff; }
+      input[type="file"] { font: inherit; font-size: .8rem; color: #b9adff; }
+      .editor-title { font-size: .8rem; color: #cfc9ee; margin-top: .4rem; }
+
+      /* timeline de descansos */
+      .timeline {
+        position: relative; width: min(94%, 380px); height: 38px; margin: .2rem auto;
+        background: #1c1c2b; border: 1px solid #2a2a40; border-radius: 8px;
+        cursor: crosshair; overflow: hidden;
+      }
+      .timeline.disabled { opacity: .4; cursor: not-allowed; }
+      #tl-regions { position: absolute; inset: 0; }
+      .tl-rest {
+        position: absolute; top: 4px; bottom: 4px;
+        background: rgba(0, 230, 168, .35); border: 1px solid #00e6a8; border-radius: 4px;
+      }
+      .tl-marker { position: absolute; top: 0; bottom: 0; width: 2px; background: #ffd24d; }
+      .tl-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: #e7e7ef; left: 0; }
+      .tl-labels {
+        display: flex; justify-content: space-between; width: min(94%, 380px);
+        margin: 0 auto; font-size: .72rem; color: #6b6890;
+      }
+      .rest-list { display: grid; gap: .3rem; width: 100%; }
+      .rest-row {
+        display: flex; gap: .4rem; align-items: center; justify-content: center;
+        font-size: .82rem; color: #cfc9ee;
+      }
+      .rest-empty { font-size: .8rem; opacity: .5; }
+
+      /* gameplay display */
+      #grade { font-size: 2rem; font-weight: 800; min-height: 2.4rem; margin-top: 1rem; }
+      .perfect { color: #00e6a8; } .cool { color: #4da3ff; }
+      .good { color: #ffd24d; } .miss { color: #ff5d73; }
+      .sequence {
+        display: flex; gap: .8rem; justify-content: center; align-items: center;
+        min-height: 56px; margin-top: .4rem;
+      }
+      .sequence .arrow {
+        font-size: 2.4rem; line-height: 1; color: #3a3a52;
+        transition: color .09s ease-out, transform .09s ease-out;
+      }
+      .sequence .arrow.loaded { color: #00e6a8; transform: translateY(-5px); }
+      .sequence .arrow.broken { color: #ff5d73; }
+      .sequence.ready { filter: drop-shadow(0 0 12px #00e6a8); }
+      .timing {
+        position: relative; width: min(90%, 360px); height: 14px;
+        margin: 1rem auto .3rem; background: #1c1c2b; border-radius: 999px; overflow: hidden;
+      }
+      .timing-target {
+        position: absolute; top: 0; bottom: 0; left: 74%; width: 12%;
+        background: rgba(140, 123, 255, .22);
+        border-left: 2px solid #6c5ce7; border-right: 2px solid #6c5ce7;
+        transition: background .06s, border-color .06s;
+      }
+      .timing.ready .timing-target { background: rgba(0, 230, 168, .35); border-color: #00e6a8; }
+      .timing.late .timing-target { background: rgba(255, 93, 115, .35); border-color: #ff5d73; }
+      .timing-head { position: absolute; top: 0; bottom: 0; width: 4px; background: #e7e7ef; }
+      .cue { min-height: 1.5rem; font-weight: 800; font-size: 1.05rem; letter-spacing: .03em; }
+      .cue.now { color: #00e6a8; } .cue.load { color: #ffd24d; }
+      #flash {
+        width: 120px; height: 120px; margin: .5rem auto 0; border-radius: 24px;
+        background: #1c1c2b;
+        transition: background .08s ease-out, transform .08s ease-out;
+      }
+      #flash.on { background: #6c5ce7; transform: scale(1.08); }
+      #flash.on.downbeat { background: #00e6a8; transform: scale(1.18); }
+      .readout { margin-top: 1.5rem; display: grid; gap: .4rem; font-size: .9rem; }
+      .readout b { color: #8c7bff; }
+      kbd { background: #23233a; padding: .12rem .45rem; border-radius: 6px; font-size: .85em; }
+      .hint { opacity: .55; margin-top: 1.25rem; font-size: .8rem; line-height: 1.6; }
+    </style>
+  </head>
+  <body>
+    <div class="panel">
+      <h1>ritmo-game</h1>
+      <p class="sub">canciones reales · sync preciso · descansos a medida</p>
+
+      <div class="nav">
+        <button id="nav-game" class="ghost small selected">▶ Juego</button>
+        <button id="nav-editor" class="ghost small">✎ Editor</button>
+      </div>
+
+      <!-- selector de canciones (compartido) -->
+      <div class="songs" id="songs"></div>
+
+      <!-- VISTA JUEGO -->
+      <div id="controls-game" class="buttons">
+        <button id="start">▶ Empezar</button>
+        <button id="calibrate" class="ghost">🎯 Calibrar</button>
+      </div>
+
+      <!-- VISTA EDITOR -->
+      <div id="controls-editor" class="editor hidden">
+        <label>📤 Subir canción: <input id="upload" type="file" accept="audio/*" /></label>
+
+        <div class="buttons">
+          <button id="sync-btn" class="ghost">🎚 Sync manual</button>
+        </div>
+        <div id="sync-panel" class="sync-panel hidden">
+          <div class="sync-row">BPM: <b id="sync-bpm">—</b></div>
+          <div class="sync-row">offset: <b id="sync-offset">—</b></div>
+          <div class="sync-row">confianza: <b id="sync-conf">—</b></div>
+          <div class="sync-row"><b id="sync-count">—</b></div>
+          <div class="buttons">
+            <button id="sync-save" class="ghost small">✓ Guardar</button>
+            <button id="sync-cancel" class="ghost small">Cancelar</button>
+          </div>
+        </div>
+        <div class="sync">
+          <span>sync fino</span>
+          <button id="offset-minus" class="ghost small">◀ −5</button>
+          <b id="song-offset">+0 ms</b>
+          <button id="offset-plus" class="ghost small">+5 ▶</button>
+        </div>
+
+        <div class="editor-title">Descansos — clic INICIO, clic FINAL en la barra:</div>
+        <div id="timeline" class="timeline">
+          <div id="tl-regions"></div>
+          <div id="tl-playhead" class="tl-playhead"></div>
+        </div>
+        <div class="tl-labels"><span>0:00</span><span id="tl-total">—</span></div>
+        <div class="rest-list" id="rest-list"></div>
+
+        <div class="buttons">
+          <button id="save-rests" class="ghost small">💾 Guardar descansos</button>
+          <button id="probar" class="ghost small">▶ Probar</button>
+        </div>
+        <div id="editor-hint" class="editor-hint"></div>
+      </div>
+
+      <div id="status" class="status"></div>
+
+      <!-- área de gameplay (compartida) -->
+      <div id="grade"></div>
+      <div id="sequence" class="sequence"></div>
+      <div class="timing" id="timing">
+        <div class="timing-target"></div>
+        <div class="timing-head" id="timing-head"></div>
+      </div>
+      <div id="cue" class="cue"></div>
+      <div id="flash"></div>
+
+      <div class="readout">
+        <div>canción: <b id="bpm">—</b></div>
+        <div>tiempo: <b id="time">0.000</b> s</div>
+        <div>beat: <b id="beat">0.00</b></div>
+        <div>score: <b id="score">0</b> · combo: <b id="combo">0</b></div>
+        <div>tendencia: <b id="bias">—</b></div>
+        <div>calibración: <b id="offset">+0 ms</b></div>
+      </div>
+
+      <p class="hint">
+        <b>Juego</b>: cargá <kbd>←</kbd><kbd>↑</kbd><kbd>→</kbd><kbd>↓</kbd> y confirmá con <kbd>Espacio</kbd>.<br />
+        <b>Editor</b>: subí, sincronizá, marcá descansos en la barra, guardá y probá.
+      </p>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
