@@ -51,6 +51,7 @@
       .editor { margin-top: 1rem; display: grid; gap: .7rem; justify-items: center; }
       .editor-hint { font-size: .82rem; color: #b9adff; min-height: 1.2rem; max-width: 360px; }
       .editor label { font-size: .82rem; color: #b9adff; }
+      .diff-picker { display: inline-flex; gap: .4rem; margin-left: .4rem; }
       input[type="file"] { font: inherit; font-size: .8rem; color: #b9adff; }
       .editor-title { font-size: .8rem; color: #cfc9ee; margin-top: .4rem; }
 
@@ -167,6 +168,14 @@
         <!-- VISTA EDITOR -->
         <div id="controls-editor" class="editor hidden">
           <label>📤 Subir canción: <input id="upload" type="file" accept="audio/*" /></label>
+
+          <label>🎚 Dificultad:
+            <span id="difficulty-picker" class="diff-picker">
+              <button id="diff-easy" type="button" class="ghost small" data-diff="easy">Fácil</button>
+              <button id="diff-normal" type="button" class="ghost small" data-diff="normal">Medio</button>
+              <button id="diff-hard" type="button" class="ghost small" data-diff="hard">Experto</button>
+            </span>
+          </label>
 
           <div class="buttons">
             <button id="sync-btn" class="ghost">🎚 Sync manual</button>

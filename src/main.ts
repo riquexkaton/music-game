@@ -12,6 +12,7 @@ import { Calibrator } from "./core/calibration";
 import { GRADE_SCORE } from "./core/judge";
 import { AnchorCollector } from "./core/tempo";
 import { type Rest, restAt, sortRests } from "./core/rests";
+import { DIFFICULTIES, rampAt, type DifficultyPreset, type DifficultyName } from "./core/song";
 import {
   listSongs,
   uploadSong,
@@ -26,7 +27,6 @@ import { createGame, type ArrowCellState, type GameApi } from "./ui/game";
 import { createResult } from "./ui/result";
 
 const BEATS_PER_BAR = 4;
-const SEQUENCE_LENGTH = 4;
 const COMMIT_WINDOW_BEATS = 1.5;
 const MISS_BEATS = 0.5;
 const APPROACH_BEATS = 4;
@@ -82,12 +82,6 @@ let songEnded = false;
 // cuando `menu` ya existe (necesitan su acento y el router). Hasta entonces null.
 let game: GameApi | null = null;
 let currentAccent = "#c8ff1e";
-
-/** Etiqueta de dificultad derivada del BPM (no hay campo dedicado en SongConfig). */
-function difficultyOf(bpm: number): string {
-  if (bpm <= 0) return "—";
-  return bpm < 100 ? "NORMAL" : bpm < 130 ? "HARD" : "EXPERT";
-}
 
 let loadedSongId: string | null = null;
 let currentBuffer: AudioBuffer | null = null;
@@ -148,6 +142,29 @@ const tlTotalEl = $("tl-total");
 const restListEl = $("rest-list");
 const saveRestsBtn = $("save-rests") as HTMLButtonElement;
 const editorHintEl = $("editor-hint");
+
+// --- selector de dificultad del editor (rampa progresiva, por canción) ---
+const diffButtons = Array.from(
+  document.querySelectorAll<HTMLButtonElement>("#difficulty-picker button"),
+);
+
+/** Marca el botón de la dificultad guardada para la canción en edición. */
+function renderDifficultyPicker(): void {
+  const current = currentSong?.difficulty ?? "normal";
+  for (const btn of diffButtons) {
+    btn.classList.toggle("selected", btn.dataset.diff === current);
+  }
+}
+
+for (const btn of diffButtons) {
+  btn.addEventListener("click", () => {
+    if (!currentSong) return;
+    const diff = btn.dataset.diff as DifficultyName;
+    persistSong(currentSong, { difficulty: diff });
+    renderDifficultyPicker();
+    editorHintEl.textContent = `Dificultad: ${DIFFICULTIES[diff].label}. Se aplica la próxima vez que juegues esta canción.`;
+  });
+}
 
 offsetEl.textContent = formatMs(inputOffset);
 
@@ -292,7 +309,7 @@ async function play(view: RunnerView = "play"): Promise<void> {
     game.setSong({
       title: song.title,
       bpm: tempo.bpm,
-      difficulty: difficultyOf(tempo.bpm),
+      difficulty: DIFFICULTIES[song.difficulty].label,
       accent: currentAccent,
     });
     game.setMuted(conductor.isMuted);
@@ -475,6 +492,7 @@ async function openEditor(): Promise<void> {
   }
   editingRests = sortRests((loadConfig(song.id)?.rests ?? song.rests ?? []).map((r) => ({ ...r })));
   pendingStartBeat = null;
+  renderDifficultyPicker();
   editorHintEl.textContent = "Cargando canción…";
   let tempo: { bpm: number; offset: number };
   try {
@@ -655,9 +673,20 @@ function scheduleBar(commitBeat: number, msg: string): void {
   renderSequence();
 }
 
+/** El preset de la dificultad elegida para la canción en juego (default: normal). */
+function activePreset(): DifficultyPreset {
+  return DIFFICULTIES[currentSong?.difficulty ?? "normal"];
+}
+
+/** Avance de la canción 0..1, para mover la rampa de dificultad con el tiempo. */
+function songProgress(): number {
+  const dur = conductor.duration;
+  return dur > 0 ? Math.max(0, Math.min(1, conductor.time / dur)) : 0;
+}
+
 function maybeSpawnPending(): void {
   if (!pendingSpawn || conductor.beat < nextBarCommit - APPROACH_BEATS) return;
-  const sequence = makeSequence(SEQUENCE_LENGTH);
+  const sequence = makeSequence(rampAt(songProgress(), activePreset()).sequenceLength);
   activeBar = { commitBeat: nextBarCommit, sequence };
   tracker = new SequenceTracker(sequence);
   pendingSpawn = false;
@@ -667,7 +696,7 @@ function maybeSpawnPending(): void {
 function advanceBar(): void {
   activeBar = null;
   tracker = null;
-  const immediate = nextBarCommit + BEATS_PER_BAR;
+  const immediate = nextBarCommit + rampAt(songProgress(), activePreset()).barStep;
   const next = skipRests(immediate);
   scheduleBar(next, next > immediate ? "Descansá 😮‍💨" : "");
 }
@@ -949,7 +978,7 @@ function finishSong(): void {
   }
   result.show({
     song: song.title,
-    difficulty: difficultyOf(chart.bpm),
+    difficulty: DIFFICULTIES[song.difficulty].label,
     bpm: chart.bpm,
     accent: currentAccent,
     score,

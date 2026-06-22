@@ -5,6 +5,7 @@
 // Así el usuario sube una canción, la configura una vez, y queda para siempre.
 
 import type { Rest } from "./core/rests";
+import type { DifficultyName } from "./core/song";
 
 export interface SongConfig {
   id: string;
@@ -19,6 +20,8 @@ export interface SongConfig {
   tempoSource: "manual" | "auto" | "none";
   /** Descansos puntuales que marcó el usuario. */
   rests: Rest[];
+  /** Dificultad elegida para esta canción: define la rampa progresiva. */
+  difficulty: DifficultyName;
 }
 
 // --- canciones que vienen con el juego ---
@@ -38,6 +41,7 @@ function defaultConfig(id: string, title: string, source: SongConfig["source"]):
     offset: 0,
     tempoSource: "none",
     rests: [],
+    difficulty: "normal",
   };
 }
 
@@ -50,7 +54,12 @@ export function saveConfig(config: SongConfig): void {
 
 export function loadConfig(id: string): SongConfig | null {
   const v = localStorage.getItem(configKey(id));
-  return v === null ? null : (JSON.parse(v) as SongConfig);
+  if (v === null) return null;
+  const config = JSON.parse(v) as SongConfig;
+  // Migración: las configs guardadas antes de la dificultad progresiva no traen
+  // el campo. Sin esto, currentSong.difficulty sería undefined y la rampa fallaría.
+  if (!config.difficulty) config.difficulty = "normal";
+  return config;
 }
 
 // ---------------- audio en IndexedDB ----------------
