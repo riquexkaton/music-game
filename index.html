@@ -3,27 +3,34 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ritmo-game</title>
+    <title>PULSE · ritmo-game</title>
+
+    <!-- Fuentes del design system Pulse -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Mono:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <!-- Smooth scroll (masonry del song select). Fallback nativo si no carga. -->
+    <script src="https://cdn.jsdelivr.net/npm/lenis@1.1.20/dist/lenis.min.js"></script>
+
     <style>
+      /* Estilos del gameplay/editor heredados (se re-skinean en fases 4 y 6).
+         El fondo/tipografía global ahora los define pulse.css (importado desde main.ts). */
       :root { color-scheme: dark; }
-      * { box-sizing: border-box; }
-      body {
-        margin: 0; min-height: 100vh; display: grid; place-items: center;
-        font-family: ui-monospace, "Cascadia Code", "SFMono-Regular", monospace;
-        background: radial-gradient(120% 120% at 50% 0%, #16162a 0%, #0a0a12 60%);
-        color: #e7e7ef;
-      }
       .panel { text-align: center; width: min(92vw, 440px); padding: 1rem 0 3rem; }
       h1 { margin: 0 0 .2rem; letter-spacing: .06em; }
       .sub { opacity: .55; margin: 0 0 1.2rem; font-size: .82rem; }
-      button {
+      /* Acotado a .panel para no filtrarse a las pantallas Pulse (botones brutalist, radius 0). */
+      .panel button {
         font: inherit; padding: .8rem 2rem; border: 0; border-radius: 999px;
         background: #6c5ce7; color: #fff; cursor: pointer; font-weight: 700;
       }
-      button:disabled { opacity: .45; cursor: default; }
-      button.ghost { background: transparent; border: 1.5px solid #6c5ce7; color: #b9adff; }
-      button.selected { background: #6c5ce7; color: #fff; border-color: #6c5ce7; }
-      button.small { padding: .35rem .7rem; font-size: .8rem; }
+      .panel button:disabled { opacity: .45; cursor: default; }
+      .panel button.ghost { background: transparent; border: 1.5px solid #6c5ce7; color: #b9adff; }
+      .panel button.selected { background: #6c5ce7; color: #fff; border-color: #6c5ce7; }
+      .panel button.small { padding: .35rem .7rem; font-size: .8rem; }
       .nav { display: flex; gap: .5rem; justify-content: center; margin-bottom: 1.1rem; }
       .buttons { display: flex; gap: .6rem; justify-content: center; flex-wrap: wrap; }
       .songs { display: flex; gap: .5rem; justify-content: center; flex-wrap: wrap; margin-bottom: .8rem; }
@@ -116,88 +123,106 @@
     </style>
   </head>
   <body>
-    <div class="panel">
-      <h1>ritmo-game</h1>
-      <p class="sub">canciones reales · sync preciso · descansos a medida</p>
-
-      <div class="nav">
-        <button id="nav-game" class="ghost small selected">▶ Juego</button>
-        <button id="nav-editor" class="ghost small">✎ Editor</button>
+    <!-- ===== SYSTEM BAR (global, estética Pulse) ===== -->
+    <div class="pl-systembar">
+      <div class="pl-marquee">
+        <span>PULSE ENGINE</span><span class="lime">// READY</span><span>DESKTOP · KEYBOARD</span><span class="magenta">RHYTHM / AUDITION-STYLE</span><span>SELECCIONÁ TU PISTA</span><span>BRUTALIST UI</span>
+        <span>PULSE ENGINE</span><span class="lime">// READY</span><span>DESKTOP · KEYBOARD</span><span class="magenta">RHYTHM / AUDITION-STYLE</span><span>SELECCIONÁ TU PISTA</span><span>BRUTALIST UI</span>
       </div>
+    </div>
 
-      <!-- selector de canciones (compartido) -->
-      <div class="songs" id="songs"></div>
+    <!-- ===== SCREEN: START (la rellena ui/menu.ts) ===== -->
+    <div id="screen-start" class="screen"></div>
 
-      <!-- VISTA JUEGO -->
-      <div id="controls-game" class="buttons">
-        <button id="start">▶ Empezar</button>
-        <button id="calibrate" class="ghost">🎯 Calibrar</button>
-      </div>
+    <!-- ===== SCREEN: SONG SELECT (la rellena ui/menu.ts) ===== -->
+    <div id="screen-select" class="screen hidden"></div>
 
-      <!-- VISTA EDITOR -->
-      <div id="controls-editor" class="editor hidden">
-        <label>📤 Subir canción: <input id="upload" type="file" accept="audio/*" /></label>
+    <!-- ===== SCREEN: GAME + EDITOR (panel heredado, ids intactos) ===== -->
+    <div id="screen-game" class="screen hidden">
+      <div class="panel">
+        <h1>ritmo-game</h1>
+        <p class="sub">canciones reales · sync preciso · descansos a medida</p>
 
-        <div class="buttons">
-          <button id="sync-btn" class="ghost">🎚 Sync manual</button>
+        <div class="nav">
+          <button id="nav-game" class="ghost small selected">▶ Juego</button>
+          <button id="nav-editor" class="ghost small">✎ Editor</button>
         </div>
-        <div id="sync-panel" class="sync-panel hidden">
-          <div class="sync-row">BPM: <b id="sync-bpm">—</b></div>
-          <div class="sync-row">offset: <b id="sync-offset">—</b></div>
-          <div class="sync-row">confianza: <b id="sync-conf">—</b></div>
-          <div class="sync-row"><b id="sync-count">—</b></div>
+
+        <!-- selector de canciones (compartido) -->
+        <div class="songs" id="songs"></div>
+
+        <!-- VISTA JUEGO -->
+        <div id="controls-game" class="buttons">
+          <button id="back-select" class="ghost small">◄ Pistas</button>
+          <button id="start">▶ Empezar</button>
+          <button id="calibrate" class="ghost">🎯 Calibrar</button>
+        </div>
+
+        <!-- VISTA EDITOR -->
+        <div id="controls-editor" class="editor hidden">
+          <label>📤 Subir canción: <input id="upload" type="file" accept="audio/*" /></label>
+
           <div class="buttons">
-            <button id="sync-save" class="ghost small">✓ Guardar</button>
-            <button id="sync-cancel" class="ghost small">Cancelar</button>
+            <button id="sync-btn" class="ghost">🎚 Sync manual</button>
           </div>
-        </div>
-        <div class="sync">
-          <span>sync fino</span>
-          <button id="offset-minus" class="ghost small">◀ −5</button>
-          <b id="song-offset">+0 ms</b>
-          <button id="offset-plus" class="ghost small">+5 ▶</button>
+          <div id="sync-panel" class="sync-panel hidden">
+            <div class="sync-row">BPM: <b id="sync-bpm">—</b></div>
+            <div class="sync-row">offset: <b id="sync-offset">—</b></div>
+            <div class="sync-row">confianza: <b id="sync-conf">—</b></div>
+            <div class="sync-row"><b id="sync-count">—</b></div>
+            <div class="buttons">
+              <button id="sync-save" class="ghost small">✓ Guardar</button>
+              <button id="sync-cancel" class="ghost small">Cancelar</button>
+            </div>
+          </div>
+          <div class="sync">
+            <span>sync fino</span>
+            <button id="offset-minus" class="ghost small">◀ −5</button>
+            <b id="song-offset">+0 ms</b>
+            <button id="offset-plus" class="ghost small">+5 ▶</button>
+          </div>
+
+          <div class="editor-title">Descansos — clic INICIO, clic FINAL en la barra:</div>
+          <div id="timeline" class="timeline">
+            <div id="tl-regions"></div>
+            <div id="tl-playhead" class="tl-playhead"></div>
+          </div>
+          <div class="tl-labels"><span>0:00</span><span id="tl-total">—</span></div>
+          <div class="rest-list" id="rest-list"></div>
+
+          <div class="buttons">
+            <button id="save-rests" class="ghost small">💾 Guardar descansos</button>
+            <button id="probar" class="ghost small">▶ Probar</button>
+          </div>
+          <div id="editor-hint" class="editor-hint"></div>
         </div>
 
-        <div class="editor-title">Descansos — clic INICIO, clic FINAL en la barra:</div>
-        <div id="timeline" class="timeline">
-          <div id="tl-regions"></div>
-          <div id="tl-playhead" class="tl-playhead"></div>
-        </div>
-        <div class="tl-labels"><span>0:00</span><span id="tl-total">—</span></div>
-        <div class="rest-list" id="rest-list"></div>
+        <div id="status" class="status"></div>
 
-        <div class="buttons">
-          <button id="save-rests" class="ghost small">💾 Guardar descansos</button>
-          <button id="probar" class="ghost small">▶ Probar</button>
+        <!-- área de gameplay (compartida) -->
+        <div id="grade"></div>
+        <div id="sequence" class="sequence"></div>
+        <div class="timing" id="timing">
+          <div class="timing-target"></div>
+          <div class="timing-head" id="timing-head"></div>
         </div>
-        <div id="editor-hint" class="editor-hint"></div>
+        <div id="cue" class="cue"></div>
+        <div id="flash"></div>
+
+        <div class="readout">
+          <div>canción: <b id="bpm">—</b></div>
+          <div>tiempo: <b id="time">0.000</b> s</div>
+          <div>beat: <b id="beat">0.00</b></div>
+          <div>score: <b id="score">0</b> · combo: <b id="combo">0</b></div>
+          <div>tendencia: <b id="bias">—</b></div>
+          <div>calibración: <b id="offset">+0 ms</b></div>
+        </div>
+
+        <p class="hint">
+          <b>Juego</b>: cargá <kbd>←</kbd><kbd>↑</kbd><kbd>→</kbd><kbd>↓</kbd> y confirmá con <kbd>Espacio</kbd>.<br />
+          <b>Editor</b>: subí, sincronizá, marcá descansos en la barra, guardá y probá.
+        </p>
       </div>
-
-      <div id="status" class="status"></div>
-
-      <!-- área de gameplay (compartida) -->
-      <div id="grade"></div>
-      <div id="sequence" class="sequence"></div>
-      <div class="timing" id="timing">
-        <div class="timing-target"></div>
-        <div class="timing-head" id="timing-head"></div>
-      </div>
-      <div id="cue" class="cue"></div>
-      <div id="flash"></div>
-
-      <div class="readout">
-        <div>canción: <b id="bpm">—</b></div>
-        <div>tiempo: <b id="time">0.000</b> s</div>
-        <div>beat: <b id="beat">0.00</b></div>
-        <div>score: <b id="score">0</b> · combo: <b id="combo">0</b></div>
-        <div>tendencia: <b id="bias">—</b></div>
-        <div>calibración: <b id="offset">+0 ms</b></div>
-      </div>
-
-      <p class="hint">
-        <b>Juego</b>: cargá <kbd>←</kbd><kbd>↑</kbd><kbd>→</kbd><kbd>↓</kbd> y confirmá con <kbd>Espacio</kbd>.<br />
-        <b>Editor</b>: subí, sincronizá, marcá descansos en la barra, guardá y probá.
-      </p>
     </div>
 
     <script type="module" src="/src/main.ts"></script>

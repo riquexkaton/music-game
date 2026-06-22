@@ -21,6 +21,7 @@ import {
   type SongConfig,
 } from "./storage";
 import { guess } from "web-audio-beat-detector";
+import { initMenu } from "./ui/menu";
 
 const BEATS_PER_BAR = 4;
 const SEQUENCE_LENGTH = 4;
@@ -125,11 +126,6 @@ const editorHintEl = $("editor-hint");
 
 offsetEl.textContent = formatMs(inputOffset);
 
-// ---------------- arranque ----------------
-void initLibrary();
-window.addEventListener("hashchange", route);
-route();
-
 async function initLibrary(): Promise<void> {
   songs = await listSongs();
   if (!currentSong) currentSong = songs[0] ?? null;
@@ -146,7 +142,10 @@ function route(): void {
   navGameBtn.classList.toggle("selected", !editor);
   navEditorBtn.classList.toggle("selected", editor);
   if (mode !== "idle") stopPlayback();
-  if (editor) void openEditor();
+  if (editor) {
+    menu.showGame();
+    void openEditor();
+  }
 }
 
 navGameBtn.addEventListener("click", () => {
@@ -800,3 +799,26 @@ function formatMs(seconds: number, withWord = false): string {
   if (ms === 0) return "justo";
   return ms > 0 ? `+${ms} ms tarde` : `${ms} ms temprano`;
 }
+
+// ---------------- arranque + menú (START + SONG SELECT, estética Pulse) ----------------
+const menu = initMenu({
+  getSongs: () => songs,
+  onSelect: (song) => {
+    currentSong = song;
+  },
+  onPlay: (song) => {
+    selectSong(song);
+    void play();
+  },
+});
+
+// "◄ Pistas": volver del juego al SONG SELECT.
+($("back-select") as HTMLButtonElement).addEventListener("click", () => {
+  if (mode !== "idle") stopPlayback();
+  menu.showSelect();
+});
+
+void initLibrary().then(() => menu.refresh());
+window.addEventListener("hashchange", route);
+route();
+if (location.hash !== "#editor") menu.showStart();
