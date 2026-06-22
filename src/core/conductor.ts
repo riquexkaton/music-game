@@ -18,6 +18,16 @@ export class Conductor {
   private buffer: AudioBuffer | null = null;
   private source: AudioBufferSourceNode | null = null;
 
+  /**
+   * Cadena de salida del audio de la canción: source -> gain (mute) -> analyser -> destination.
+   * Se crea perezosamente y SOLO si el AudioContext expone los métodos (en los
+   * tests el AudioContext es falso y no los tiene; ahí queda todo en null y no se toca).
+   */
+  private gain: GainNode | null = null;
+  private analyser: AnalyserNode | null = null;
+  private freqData: Uint8Array<ArrayBuffer> | null = null;
+  private muted = false;
+
   /** `audio.currentTime` en el instante en que arrancó la canción. */
   private startTime = 0;
   /** Posición (en seg) donde se pausó, para poder reanudar sin saltos. */
@@ -55,7 +65,7 @@ export class Conductor {
       // Un AudioBufferSourceNode es de UN solo uso: hay que crear uno nuevo cada vez.
       this.source = this.audio.createBufferSource();
       this.source.buffer = this.buffer;
-      this.source.connect(this.audio.destination);
+      this.source.connect(this.outputNode());
       this.source.start(this.audio.currentTime, this.pausedAt); // 2º arg = desde qué seg
     }
     this.running = true;
@@ -110,5 +120,59 @@ export class Conductor {
    */
   audioTimeForBeat(beat: number): number {
     return this.startTime + beatToSeconds(this.chart, beat);
+  }
+
+  /**
+   * Construye (una vez) la cadena gain -> analyser -> destination y devuelve el
+   * nodo al que conectar el source. Best-effort: si el AudioContext no tiene
+   * `createGain`/`createAnalyser` (tests con un clock falso) cae a `destination`.
+   */
+  private outputNode(): AudioNode {
+    const ctx = this.audio as AudioContext & {
+      createGain?: () => GainNode;
+      createAnalyser?: () => AnalyserNode;
+    };
+    if (!this.analyser && typeof ctx.createAnalyser === "function" && typeof ctx.createGain === "function") {
+      try {
+        this.gain = ctx.createGain();
+        this.analyser = ctx.createAnalyser();
+        this.analyser.fftSize = 256;
+        this.freqData = new Uint8Array(new ArrayBuffer(this.analyser.frequencyBinCount));
+        this.gain.gain.value = this.muted ? 0 : 1;
+        this.gain.connect(this.analyser);
+        this.analyser.connect(this.audio.destination);
+      } catch {
+        this.gain = null;
+        this.analyser = null;
+        this.freqData = null;
+      }
+    }
+    return this.gain ?? this.audio.destination;
+  }
+
+  /** Silencia/activa el audio de la canción (no afecta el reloj ni el scheduler). */
+  setMuted(muted: boolean): void {
+    this.muted = muted;
+    if (this.gain) this.gain.gain.value = muted ? 0 : 1;
+  }
+
+  get isMuted(): boolean {
+    return this.muted;
+  }
+
+  /**
+   * Espectro de frecuencias del audio que suena AHORA (0..255 por bin), o null
+   * si todavía no hay analyser (sin audio o entorno sin Web Audio real).
+   * Lo consume waves.ts para reaccionar al audio real.
+   */
+  getFrequencyData(): Uint8Array | null {
+    if (!this.analyser || !this.freqData) return null;
+    this.analyser.getByteFrequencyData(this.freqData);
+    return this.freqData;
+  }
+
+  /** Duración en segundos del audio cargado (0 si no hay buffer). */
+  get duration(): number {
+    return this.buffer ? this.buffer.duration : 0;
   }
 }

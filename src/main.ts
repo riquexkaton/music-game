@@ -22,6 +22,8 @@ import {
 } from "./storage";
 import { guess } from "web-audio-beat-detector";
 import { initMenu } from "./ui/menu";
+import { createGame, type ArrowCellState, type GameApi } from "./ui/game";
+import { createResult } from "./ui/result";
 
 const BEATS_PER_BAR = 4;
 const SEQUENCE_LENGTH = 4;
@@ -63,6 +65,29 @@ let syncCollector: AnchorCollector | null = null;
 let score = 0;
 let combo = 0;
 const recentDeltas: number[] = [];
+
+// --- vista de render del runner: "panel" (editor "Probar") o "play" (juego real) ---
+type RunnerView = "panel" | "play";
+let runnerView: RunnerView = "panel";
+
+// --- estadísticas de la partida (para la pantalla RESULT) ---
+let bestCombo = 0;
+let perfects = 0;
+let goods = 0;
+let misses = 0;
+let exprTimer = 0;
+let songEnded = false;
+
+// Vista de juego (game.ts) y resultados (result.ts). Se instancian al final,
+// cuando `menu` ya existe (necesitan su acento y el router). Hasta entonces null.
+let game: GameApi | null = null;
+let currentAccent = "#c8ff1e";
+
+/** Etiqueta de dificultad derivada del BPM (no hay campo dedicado en SongConfig). */
+function difficultyOf(bpm: number): string {
+  if (bpm <= 0) return "—";
+  return bpm < 100 ? "NORMAL" : bpm < 130 ? "HARD" : "EXPERT";
+}
 
 let loadedSongId: string | null = null;
 let currentBuffer: AudioBuffer | null = null;
@@ -143,6 +168,7 @@ function route(): void {
   navEditorBtn.classList.toggle("selected", editor);
   if (mode !== "idle") stopPlayback();
   if (editor) {
+    runnerView = "panel"; // el editor "Probar" pinta en el panel viejo, no en #screen-play
     menu.showGame();
     void openEditor();
   }
@@ -212,12 +238,15 @@ function stopPlayback(): void {
 }
 
 // ---------------- PLAY (juego y "Probar" del editor) ----------------
-startBtn.addEventListener("click", () => void play());
-probarBtn.addEventListener("click", () => void play());
+// `view` decide DÓNDE se pinta el runner: "panel" = ids viejos del editor;
+// "play" = la pantalla nueva #screen-play (game.ts). El motor es el MISMO.
+startBtn.addEventListener("click", () => void play("panel"));
+probarBtn.addEventListener("click", () => void play("panel"));
 
-async function play(): Promise<void> {
+async function play(view: RunnerView = "play"): Promise<void> {
   const song = currentSong;
   if (!song) return;
+  runnerView = view;
   await conductor.resume();
   startBtn.disabled = true;
   calibBtn.disabled = true;
@@ -243,6 +272,11 @@ async function play(): Promise<void> {
 
   score = 0;
   combo = 0;
+  bestCombo = 0;
+  perfects = 0;
+  goods = 0;
+  misses = 0;
+  songEnded = false;
   recentDeltas.length = 0;
   activeBar = null;
   scoreEl.textContent = "0";
@@ -250,6 +284,20 @@ async function play(): Promise<void> {
   biasEl.textContent = "—";
   gradeEl.textContent = "";
   gradeEl.className = "";
+
+  // Vista nueva (#screen-play): preparar la piel con datos reales de la canción.
+  if (runnerView === "play" && game) {
+    currentAccent = menu.currentAccent();
+    menu.showPlay();
+    game.setSong({
+      title: song.title,
+      bpm: tempo.bpm,
+      difficulty: difficultyOf(tempo.bpm),
+      accent: currentAccent,
+    });
+    game.setMuted(conductor.isMuted);
+    game.start();
+  }
 
   conductor.reset();
   conductor.start();
@@ -552,6 +600,14 @@ saveRestsBtn.addEventListener("click", () => {
 
 // ---------------- INPUT ----------------
 window.addEventListener("keydown", (e) => {
+  // ESC durante el juego real (#screen-play) = el botón "ESC · SALIR": volver a SELECT.
+  if (e.code === "Escape" && mode === "playing" && runnerView === "play") {
+    e.preventDefault();
+    stopPlayback();
+    if (game) game.stop();
+    menu.showSelect();
+    return;
+  }
   if (e.code === "Space") {
     e.preventDefault();
     if (mode === "calibrating") onCalibrationTap();
@@ -649,20 +705,51 @@ function applyResult({ grade, delta, sequenceOk }: BarResult): void {
     combo += 1;
     score += GRADE_SCORE[grade] * combo;
   }
+  if (combo > bestCombo) bestCombo = combo;
+  // Conteo por judgment para RESULT: cool cuenta como PERFECT/azul (blueprint §4).
+  if (grade === "miss") misses += 1;
+  else if (grade === "good") goods += 1;
+  else perfects += 1; // perfect + cool
+
   const reason = sequenceOk ? formatMs(delta, true) : "secuencia rota";
   gradeEl.textContent = `${grade.toUpperCase()} · ${reason}`;
   gradeEl.className = grade;
   scoreEl.textContent = String(score);
   comboEl.textContent = String(combo);
   if (sequenceOk) trackBias(delta);
+
+  // Piel del juego real (game.ts): judgment + FX + personaje + HUD.
+  if (runnerView === "play" && game) {
+    const judg: "PERFECT" | "GOOD" | "MISS" =
+      grade === "miss" ? "MISS" : grade === "good" ? "GOOD" : "PERFECT";
+    game.showJudgment(judg);
+    game.setScore(score);
+    game.setCombo(combo);
+    game.setBest(bestCombo);
+    setPlayExpression(grade === "miss" ? "miss" : "hit");
+  }
+}
+
+/** Expresión del personaje con vuelta a 'idle' a los ~620ms (blueprint §4). */
+function setPlayExpression(e: "hit" | "miss"): void {
+  if (!game) return;
+  game.setExpression(e);
+  clearTimeout(exprTimer);
+  exprTimer = window.setTimeout(() => game?.setExpression("idle"), 620);
 }
 
 function resolveTimeout(): void {
   combo = 0;
+  misses += 1;
   const reason = tracker && !tracker.isReady ? "secuencia incompleta" : "no confirmaste";
   gradeEl.textContent = `MISS · ${reason}`;
   gradeEl.className = "miss";
   comboEl.textContent = "0";
+  if (runnerView === "play" && game) {
+    game.showJudgment("MISS");
+    game.setCombo(0);
+    setPlayExpression("miss");
+  }
 }
 
 function trackBias(delta: number): void {
@@ -694,6 +781,10 @@ function finishCalibration(): void {
 
 // ---------------- render ----------------
 function renderSequence(): void {
+  if (runnerView === "play") {
+    renderSequencePlay();
+    return;
+  }
   if (!activeBar || !tracker) {
     sequenceEl.innerHTML = "";
     sequenceEl.className = "sequence";
@@ -709,7 +800,29 @@ function renderSequence(): void {
     .join("");
 }
 
+/** Versión de renderSequence para la pantalla #screen-play (game.ts). */
+function renderSequencePlay(): void {
+  if (!game) return;
+  if (!activeBar || !tracker) {
+    game.renderSequence(null, []);
+    return;
+  }
+  const t = tracker;
+  const glyphs = activeBar.sequence.map((a) => ARROW_GLYPH[a]);
+  const states: ArrowCellState[] = activeBar.sequence.map((_, i) => {
+    if (t.isBroken) return i < t.loaded ? "done" : "pending";
+    if (i < t.loaded) return "done";
+    if (i === t.loaded) return "current";
+    return "pending";
+  });
+  game.renderSequence(states, glyphs);
+}
+
 function renderTiming(): void {
+  if (runnerView === "play") {
+    renderTimingPlay();
+    return;
+  }
   if (mode !== "playing" || !activeBar || !tracker) {
     timingHead.style.left = "0%";
     timingEl.className = "timing";
@@ -751,6 +864,19 @@ function renderTiming(): void {
   }
 }
 
+/** renderTiming para #screen-play: playhead + fase (cargar/confirmar). */
+function renderTimingPlay(): void {
+  if (!game) return;
+  if (mode !== "playing" || !activeBar || !tracker) {
+    game.renderTiming(0, null);
+    return;
+  }
+  const bar = activeBar;
+  const span = APPROACH_BEATS + AFTER_BEATS;
+  const progress = (conductor.beat - (bar.commitBeat - APPROACH_BEATS)) / span;
+  game.renderTiming(progress, tracker.isReady ? "confirm" : "load");
+}
+
 let looping = false;
 function ensureLoop(): void {
   if (looping) return;
@@ -768,6 +894,17 @@ function loop(): void {
     if (activeBar && conductor.beat > activeBar.commitBeat + MISS_BEATS) {
       resolveTimeout();
       advanceBar();
+    }
+    // Progreso real de la canción + fin de canción → RESULT (sólo en juego real).
+    if (runnerView === "play" && game) {
+      const dur = conductor.duration;
+      if (dur > 0) {
+        game.setProgress(conductor.time / dur);
+        if (!songEnded && conductor.time >= dur) {
+          songEnded = true;
+          finishSong();
+        }
+      }
     }
   }
   renderTiming();
@@ -800,6 +937,30 @@ function formatMs(seconds: number, withWord = false): string {
   return ms > 0 ? `+${ms} ms tarde` : `${ms} ms temprano`;
 }
 
+// ---------------- fin de canción → RESULT ----------------
+function finishSong(): void {
+  const song = currentSong;
+  stopPlayback();
+  clearTimeout(exprTimer);
+  if (game) game.stop();
+  if (!song) {
+    menu.showSelect();
+    return;
+  }
+  result.show({
+    song: song.title,
+    difficulty: difficultyOf(chart.bpm),
+    bpm: chart.bpm,
+    accent: currentAccent,
+    score,
+    best: bestCombo,
+    perfects,
+    goods,
+    misses,
+  });
+  menu.showResult();
+}
+
 // ---------------- arranque + menú (START + SONG SELECT, estética Pulse) ----------------
 const menu = initMenu({
   getSongs: () => songs,
@@ -808,8 +969,29 @@ const menu = initMenu({
   },
   onPlay: (song) => {
     selectSong(song);
-    void play();
+    void play("play");
   },
+});
+
+// Vista de juego real (#screen-play): se instancia acá (ya existe `menu`).
+game = createGame($("screen-play"), {
+  onToggleMute: () => {
+    conductor.setMuted(!conductor.isMuted);
+    return conductor.isMuted;
+  },
+  onExit: () => {
+    if (mode !== "idle") stopPlayback();
+    if (game) game.stop();
+    menu.showSelect();
+  },
+  getFreq: () => conductor.getFrequencyData(),
+  getBpm: () => chart.bpm,
+});
+
+// Pantalla de resultados (#screen-result).
+const result = createResult($("screen-result"), {
+  onRetry: () => void play("play"),
+  onBackToList: () => menu.showSelect(),
 });
 
 // "◄ Pistas": volver del juego al SONG SELECT.

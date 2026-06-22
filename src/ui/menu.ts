@@ -21,11 +21,17 @@ export interface MenuApi {
   showStart: () => void;
   showSelect: () => void;
   showGame: () => void;
+  /** Pantalla de gameplay real (#screen-play). */
+  showPlay: () => void;
+  /** Pantalla de resultados (#screen-result). */
+  showResult: () => void;
+  /** El acento de la card actualmente seleccionada (para teñir play/result). */
+  currentAccent: () => string;
   /** Re-renderiza las cards (p. ej. tras subir una canción). */
   refresh: () => void;
 }
 
-type Screen = "start" | "select" | "game";
+type Screen = "start" | "select" | "game" | "play" | "result";
 
 // Lenis (smooth scroll) llega por CDN en index.html. Tipado mínimo + fallback nativo.
 interface LenisLike {
@@ -51,6 +57,8 @@ export function initMenu(hooks: MenuHooks): MenuApi {
   const startScreen = $("screen-start");
   const selectScreen = $("screen-select");
   const gameScreen = $("screen-game");
+  const playScreen = $("screen-play");
+  const resultScreen = $("screen-result");
 
   let current: Screen = "start";
   let sel = 0;
@@ -262,7 +270,7 @@ export function initMenu(hooks: MenuHooks): MenuApi {
   function transitionToGame(song: SongConfig): void {
     wipe();
     window.setTimeout(() => {
-      showGame();
+      // El motor (onPlay) decide la pantalla real (showPlay). Sólo disparamos el play.
       hooks.onPlay(song);
     }, 360);
   }
@@ -296,6 +304,8 @@ export function initMenu(hooks: MenuHooks): MenuApi {
     startScreen.classList.toggle("hidden", s !== "start");
     selectScreen.classList.toggle("hidden", s !== "select");
     gameScreen.classList.toggle("hidden", s !== "game");
+    playScreen.classList.toggle("hidden", s !== "play");
+    resultScreen.classList.toggle("hidden", s !== "result");
   }
   function showStart(): void {
     destroyLenis();
@@ -314,6 +324,17 @@ export function initMenu(hooks: MenuHooks): MenuApi {
     destroyLenis();
     setScreen("game");
   }
+  function showPlay(): void {
+    destroyLenis();
+    setScreen("play");
+  }
+  function showResult(): void {
+    destroyLenis();
+    setScreen("result");
+  }
+  function currentAccent(): string {
+    return accentFor(sel);
+  }
 
   function refresh(): void {
     updateStartFoot();
@@ -321,5 +342,5 @@ export function initMenu(hooks: MenuHooks): MenuApi {
   }
 
   updateStartFoot();
-  return { showStart, showSelect, showGame, refresh };
+  return { showStart, showSelect, showGame, showPlay, showResult, currentAccent, refresh };
 }
