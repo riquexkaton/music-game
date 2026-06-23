@@ -35,6 +35,16 @@
 html, body { margin: 0; padding: 0; }
 ::selection { background: var(--lime); color: var(--ink); }
 
+/* acceso discreto al EDITOR desde el START (esquina inferior derecha) */
+.pl-edit-link {
+  position: absolute; bottom: 24px; right: 28px; z-index: 5;
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em;
+  color: var(--paper-dim); background: transparent;
+  border: 1.5px solid var(--line); padding: 7px 12px; cursor: pointer;
+  transition: color 0.18s ease, border-color 0.18s ease;
+}
+.pl-edit-link:hover { color: var(--lime); border-color: var(--lime); }
+
 body {
   min-height: 100vh;
   display: flex;

@@ -92,8 +92,13 @@ export function initMenu(hooks: MenuHooks): MenuApi {
         <div class="pl-start-hint">CLICK O PRESIONÁ <span class="pl-kbd">ENTER</span> <span class="pl-cursor">_</span></div>
       </div>
       <div class="pl-start-foot" id="pl-start-foot"></div>
+      <button class="pl-edit-link" id="pl-edit-link" type="button">✎ EDITOR</button>
     </div>`;
   $("pl-start-body").addEventListener("click", () => transitionToSelect());
+  $("pl-edit-link").addEventListener("click", (e) => {
+    e.stopPropagation(); // que no dispare el "JUGAR" del cuerpo
+    location.hash = "#editor";
+  });
 
   function updateStartFoot(): void {
     const n = songs().length;

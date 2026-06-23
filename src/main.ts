@@ -13,6 +13,8 @@ import { GRADE_SCORE } from "./core/judge";
 import { AnchorCollector } from "./core/tempo";
 import { type Rest, restAt, sortRests } from "./core/rests";
 import { DIFFICULTIES, rampAt, type DifficultyPreset, type DifficultyName } from "./core/song";
+import { analyzeEnergy, intensityAt, type EnergyMap } from "./core/energy";
+import { createSfx } from "./core/sfx";
 import {
   listSongs,
   uploadSong,
@@ -32,11 +34,13 @@ const MISS_BEATS = 0.5;
 const APPROACH_BEATS = 4;
 const AFTER_BEATS = 1;
 const LEAD_IN_BEATS = 8; // "preparate" antes de la primera secuencia (siempre)
+const WARMUP_SEC = 8; // arranque suave: la densidad por energía se "abre" en estos segundos
 
 const chart: Chart = { title: "Metrónomo", bpm: 120, offset: 0, bars: [] };
 const conductor = new Conductor(chart);
 const scheduler = new Scheduler(conductor, BEATS_PER_BAR);
 const calibrator = new Calibrator(8);
+const sfx = createSfx(conductor.audio);
 
 type Mode = "idle" | "playing" | "calibrating" | "syncing";
 let mode: Mode = "idle";
@@ -85,6 +89,7 @@ let currentAccent = "#c8ff1e";
 
 let loadedSongId: string | null = null;
 let currentBuffer: AudioBuffer | null = null;
+let currentEnergy: EnergyMap | null = null; // mapa de energía de la canción cargada
 
 const INPUT_OFFSET_KEY = "ritmo:inputOffset";
 let inputOffset = loadInputOffset();
@@ -333,6 +338,7 @@ async function ensureSongReady(song: SongConfig): Promise<{ bpm: number; offset:
     const url = await getAudioUrl(song);
     if (!url) throw new Error("sin audio");
     currentBuffer = await conductor.load(url);
+    currentEnergy = analyzeEnergy(currentBuffer.getChannelData(0), currentBuffer.sampleRate);
     loadedSongId = song.id;
   }
   const saved = loadConfig(song.id) ?? song;
@@ -678,15 +684,14 @@ function activePreset(): DifficultyPreset {
   return DIFFICULTIES[currentSong?.difficulty ?? "normal"];
 }
 
-/** Avance de la canción 0..1, para mover la rampa de dificultad con el tiempo. */
-function songProgress(): number {
-  const dur = conductor.duration;
-  return dur > 0 ? Math.max(0, Math.min(1, conductor.time / dur)) : 0;
+/** La intensidad de la música AHORA (0..1), con arranque suave. Mueve la densidad. */
+function currentIntensity(): number {
+  return currentEnergy ? intensityAt(currentEnergy, conductor.time, WARMUP_SEC) : 0;
 }
 
 function maybeSpawnPending(): void {
   if (!pendingSpawn || conductor.beat < nextBarCommit - APPROACH_BEATS) return;
-  const sequence = makeSequence(rampAt(songProgress(), activePreset()).sequenceLength);
+  const sequence = makeSequence(rampAt(currentIntensity(), activePreset()).sequenceLength);
   activeBar = { commitBeat: nextBarCommit, sequence };
   tracker = new SequenceTracker(sequence);
   pendingSpawn = false;
@@ -696,7 +701,7 @@ function maybeSpawnPending(): void {
 function advanceBar(): void {
   activeBar = null;
   tracker = null;
-  const immediate = nextBarCommit + rampAt(songProgress(), activePreset()).barStep;
+  const immediate = nextBarCommit + rampAt(currentIntensity(), activePreset()).barStep;
   const next = skipRests(immediate);
   scheduleBar(next, next > immediate ? "Descansá 😮‍💨" : "");
 }
@@ -709,6 +714,7 @@ function makeSequence(n: number): Arrow[] {
 
 function onArrow(arrow: Arrow): void {
   if (!tracker) return;
+  sfx.key(); // golpe percusivo neutro: pega con cualquier canción
   tracker.press(arrow);
   renderSequence();
 }
@@ -728,6 +734,10 @@ function onCommit(): void {
 }
 
 function applyResult({ grade, delta, sequenceOk }: BarResult): void {
+  // SFX según el juicio (cool cuenta como perfect, igual que el conteo de abajo).
+  if (grade === "miss") sfx.miss();
+  else if (grade === "good") sfx.good();
+  else sfx.perfect();
   if (grade === "miss") {
     combo = 0;
   } else {
@@ -768,6 +778,7 @@ function setPlayExpression(e: "hit" | "miss"): void {
 }
 
 function resolveTimeout(): void {
+  sfx.miss();
   combo = 0;
   misses += 1;
   const reason = tracker && !tracker.isReady ? "secuencia incompleta" : "no confirmaste";
