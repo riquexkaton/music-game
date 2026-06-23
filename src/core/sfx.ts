@@ -76,13 +76,42 @@ export function createSfx(ctx: AudioContext): Sfx {
     src.stop(t + dur + 0.05);
   }
 
+  // Sample del "perfect": un orchestra hit (public/sfx/). Se carga en background;
+  // hasta que llegue (o si falla la carga), el perfect cae al sintetizado.
+  let perfectBuf: AudioBuffer | null = null;
+  if (canSynth && typeof ctx.decodeAudioData === "function" && typeof fetch === "function") {
+    fetch("/sfx/orchestra-hit.mp3")
+      .then((r) => r.arrayBuffer())
+      .then((b) => ctx.decodeAudioData(b))
+      .then((buf) => {
+        perfectBuf = buf;
+      })
+      .catch(() => {
+        perfectBuf = null;
+      });
+  }
+
+  /** Reproduce un sample (AudioBuffer) una vez, a `peak` de volumen. */
+  function playSample(buf: AudioBuffer, peak: number): void {
+    const src = ctx.createBufferSource();
+    const gain = ctx.createGain();
+    src.buffer = buf;
+    gain.gain.value = peak;
+    src.connect(gain).connect(ctx.destination);
+    src.start(ctx.currentTime);
+  }
+
   return {
     key() {
       hit({ from: 840, to: 300, dur: 0.05, peak: 0.26, type: "triangle" });
     },
     perfect() {
-      // Riser que sube (eleva) + impacto en octavas (760 · 1520 · 2280 = armónicos
-      // naturales, consonantes con cualquier tonalidad). Fuerte y triunfal.
+      // El orchestra hit (sample) que pidió el usuario. Si todavía no cargó, cae al
+      // sintetizado: riser que sube + impacto en octavas (armónicos naturales).
+      if (perfectBuf) {
+        playSample(perfectBuf, 0.85);
+        return;
+      }
       noiseSweep(0.2, 0.22, 700, 6500);
       hit({ from: 760, to: 380, dur: 0.16, peak: 0.32, type: "triangle", delay: 0.12 });
       hit({ from: 1520, to: 760, dur: 0.2, peak: 0.22, type: "triangle", delay: 0.12 });
