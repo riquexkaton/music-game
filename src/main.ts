@@ -11,7 +11,7 @@ import { SequenceTracker } from "./core/sequence";
 import { Calibrator } from "./core/calibration";
 import { GRADE_SCORE } from "./core/judge";
 import { AnchorCollector } from "./core/tempo";
-import { type Rest, restAt, sortRests } from "./core/rests";
+import { type Rest, restAt, restEndBeat, sortRests } from "./core/rests";
 import { DIFFICULTIES, rampAt, type DifficultyPreset, type DifficultyName } from "./core/song";
 import { analyzeEnergy, intensityAt, type EnergyMap } from "./core/energy";
 import { createSfx } from "./core/sfx";
@@ -861,7 +861,12 @@ function renderSequencePlay(): void {
   const t = tracker;
   const glyphs = activeBar.sequence.map((a) => ARROW_GLYPH[a]);
   const states: ArrowCellState[] = activeBar.sequence.map((_, i) => {
-    if (t.isBroken) return i < t.loaded ? "done" : "pending";
+    if (t.isBroken) {
+      // La flecha en t.loaded es la que recibió el input equivocado → miss-flash.
+      if (i < t.loaded) return "done";
+      if (i === t.loaded) return "wrong";
+      return "pending";
+    }
     if (i < t.loaded) return "done";
     if (i === t.loaded) return "current";
     return "pending";
@@ -915,9 +920,30 @@ function renderTiming(): void {
   }
 }
 
-/** renderTiming para #screen-play: playhead + fase (cargar/confirmar). */
+/** renderTiming para #screen-play: descanso real, o playhead + fase (cargar/confirmar). */
 function renderTimingPlay(): void {
   if (!game) return;
+
+  // DESCANSO REAL: ¿el beat actual cae DENTRO de un descanso de la canción?
+  // Esto es independiente del lead-in/espera normal: lead-in NO está marcado como
+  // rest, así que sólo entramos acá en descansos de verdad (src/core/rests.ts).
+  // Derivamos segundos restantes y fracción a partir del beat real y restEndBeat
+  // (encadena descansos pegados) — NO inventamos lógica de motor, sólo enrutamos.
+  if (mode === "playing") {
+    const rest = restAt(conductor.beat, currentRests);
+    if (rest) {
+      const spb = 60 / (chart.bpm || 120);
+      const endBeat = restEndBeat(conductor.beat, currentRests);
+      const totalBeatsLeft = endBeat - rest.atBeat; // span completo (con encadenados)
+      const remainingBeats = endBeat - conductor.beat;
+      const secondsLeft = Math.max(0, remainingBeats * spb);
+      const fraction = totalBeatsLeft > 0 ? remainingBeats / totalBeatsLeft : 0;
+      game.setBreak(true, secondsLeft, fraction);
+      return;
+    }
+  }
+  game.setBreak(false);
+
   if (mode !== "playing" || !activeBar || !tracker) {
     game.renderTiming(0, null);
     return;
@@ -956,6 +982,7 @@ function loop(): void {
           finishSong();
         }
       }
+      game.setTimecode(formatTimecode(conductor.time));
     }
   }
   renderTiming();
@@ -979,6 +1006,13 @@ function flash(accent = false): void {
 function formatTime(seconds: number): string {
   const total = Math.max(0, Math.round(seconds));
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
+/** Timecode decorativo "TC mm:ss:cc · Fnn" (cc = centisegundos, nn = frame a 60fps). */
+function formatTimecode(seconds: number): string {
+  const t = Math.max(0, seconds);
+  const p2 = (n: number): string => String(Math.floor(n)).padStart(2, "0");
+  return `TC ${p2(t / 60)}:${p2(t % 60)}:${p2((t * 100) % 100)} · F${p2((t * 60) % 60)}`;
 }
 
 function formatMs(seconds: number, withWord = false): string {
