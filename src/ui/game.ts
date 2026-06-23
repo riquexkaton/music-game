@@ -9,6 +9,7 @@
 import { createCharacter, type CharacterApi } from "./character";
 import { createWaves, type WavesApi } from "./waves";
 import { createFx, type FxApi } from "./fx";
+import { createStream, type StreamApi } from "./stream";
 import { TIMING_WINDOWS, type Grade } from "../core/judge";
 
 // --- Geometría de la barra de timing (DEBE coincidir con el MOTOR) ---
@@ -153,8 +154,16 @@ export function createGame(root: HTMLElement, hooks: GameHooks): GameApi {
       <div class="pl-flash" id="plg-flash"></div>
       <canvas class="pl-fx-canvas" id="plg-fx"></canvas>
 
+      <!-- capa stream/hype DECORATIVA (autónoma): speed lines + emotes + alertas -->
+      <div class="pl-speed" id="plg-speed"></div>
+      <div class="pl-emote-layer" id="plg-emote-layer"></div>
+      <div class="pl-alert-layer" id="plg-alert-layer"></div>
+
       <div class="pl-gamecol">
         <canvas class="pl-wave-canvas" id="plg-wave"></canvas>
+
+        <!-- grilla en perspectiva reactiva (decorativa) -->
+        <div class="pl-bg-grid" id="plg-bg-grid"></div>
 
         <!-- decoración ambiental (detrás del HUD, z-index 0) -->
         <div class="pl-ambient">
@@ -170,9 +179,20 @@ export function createGame(root: HTMLElement, hooks: GameHooks): GameApi {
           <div class="pl-bracket pl-bracket-bl"></div>
           <div class="pl-bracket pl-bracket-br"></div>
           <div class="pl-reg pl-reg-top">PULSE-ENGINE // LIVE</div>
-          <div class="pl-reg pl-reg-left">SYS.RHYTHM · AUDITION</div>
           <div class="pl-reg pl-reg-tc" id="plg-tc">TC 00:00:00 · F00</div>
         </div>
+
+        <!-- medidor de HYPE (borde izquierdo) — decorativo. La etiqueta "HYPE"
+             ocupa el lugar del viejo registro vertical SYS.RHYTHM · AUDITION. -->
+        <div class="pl-hype-track"><div class="pl-hype-fill" id="plg-hype-fill"></div></div>
+        <div class="pl-hype-label">HYPE</div>
+        <div class="pl-hype-flame" id="plg-hype-flame">🔥</div>
+
+        <!-- chat en vivo (decorativo) -->
+        <div class="pl-chat-layer" id="plg-chat-layer"></div>
+
+        <!-- hito de combo en el centro (decorativo) -->
+        <div class="pl-combo-flair" id="plg-combo-flair"></div>
 
         <div class="pl-gamecol-inner">
           <div class="pl-hud">
@@ -182,7 +202,8 @@ export function createGame(root: HTMLElement, hooks: GameHooks): GameApi {
             </div>
             <div class="pl-hud-stat pl-hud-right">
               <div class="pl-hud-label">COMBO</div>
-              <div class="pl-hud-combo" id="plg-combo">0<span class="pl-hud-x">x</span></div>
+              <div class="pl-hud-combo pl-hud-combo-reactive" id="plg-combo">0<span class="pl-hud-x">x</span></div>
+              <div class="pl-mult" id="plg-mult">×1.0 PUNTOS</div>
             </div>
           </div>
 
@@ -289,11 +310,38 @@ export function createGame(root: HTMLElement, hooks: GameHooks): GameApi {
   const ringsEl = $("plg-rings");
   const ringCoreEl = $("plg-ring-core");
   const tcEl = $("plg-tc");
+  // capa stream/hype (decorativa, autónoma)
+  const gridEl = $("plg-bg-grid");
+  const speedEl = $("plg-speed");
+  const emoteLayerEl = $("plg-emote-layer");
+  const alertLayerEl = $("plg-alert-layer");
+  const hypeFillEl = $("plg-hype-fill");
+  const hypeFlameEl = $("plg-hype-flame");
+  const chatLayerEl = $("plg-chat-layer");
+  const multEl = $("plg-mult");
+  const comboFlairEl = $("plg-combo-flair");
 
   // ---------------- módulos (instanciados por sus interfaces, §3) ----------------
   const character: CharacterApi = createCharacter(charStack);
   const waves: WavesApi = createWaves(waveCanvas, hooks.getFreq, hooks.getBpm);
   const fx: FxApi = createFx(fxCanvas, flashEl, fieldEl);
+  // Capa stream/hype: 100% DECORATIVA y AUTÓNOMA (animaciones por timers internos,
+  // NO cableadas a datos del motor). Misma lifecycle que waves/fx (start/stop).
+  const stream: StreamApi = createStream(
+    {
+      grid: gridEl,
+      speed: speedEl,
+      emoteLayer: emoteLayerEl,
+      alertLayer: alertLayerEl,
+      hypeFill: hypeFillEl,
+      hypeFlame: hypeFlameEl,
+      chatLayer: chatLayerEl,
+      comboNum: comboEl,
+      mult: multEl,
+      comboFlair: comboFlairEl,
+    },
+    hooks.getBpm,
+  );
 
   // ---------------- acento por canción ----------------
   function applyAccent(hex: string): void {
@@ -308,6 +356,7 @@ export function createGame(root: HTMLElement, hooks: GameHooks): GameApi {
     for (const bar of Array.from(charMeter.children) as HTMLElement[]) bar.style.background = hex;
     character.setAccent(hex);
     waves.setAccent(hex);
+    stream.setAccent(hex);
   }
 
   // Duración de las animaciones de pulso (anillos + core) derivada del BPM real,
@@ -576,7 +625,11 @@ export function createGame(root: HTMLElement, hooks: GameHooks): GameApi {
     start: () => {
       fx.resize();
       waves.start();
+      stream.start();
     },
-    stop: () => waves.stop(),
+    stop: () => {
+      waves.stop();
+      stream.stop();
+    },
   };
 }

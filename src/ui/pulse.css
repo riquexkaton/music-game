@@ -318,9 +318,19 @@ body {
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 0.16em;
-  opacity: 0.7;
 }
-.pl-card-meta span:last-child { font-weight: 700; letter-spacing: 0.14em; }
+/* "PISTA NN" (izq) atenuado fijo, como el diseño (opacity .7 por-span, no en el
+   contenedor: así la opacity del badge no se compone y queda fiel). */
+.pl-card-meta span:first-child { opacity: 0.7; }
+/* badge de estado (glyph + copy): Space Mono 700, glyph antepuesto con gap.
+   color = headerFg (lo hereda del head); opacity por estado más abajo. */
+.pl-card-meta span:last-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
 .pl-card-title {
   font-family: var(--font-display);
   font-size: 19px;
@@ -459,36 +469,48 @@ body {
 .pl-play-cta span:first-child { font-family: var(--font-display); font-size: 22px; }
 .pl-play-cta span:last-child { font-family: var(--font-display); font-size: 20px; letter-spacing: 0.04em; }
 
-/* --- canción BLOQUEADA (sin sync manual): no se puede jugar, hay que sincronizar --- */
-.pl-card.locked { opacity: 0.8; }
-/* desaturar SOLO head+body (la franja queda viva): se ve "apagada" pero el 🔒 grita.
-   Va por filter y no por --accent porque el accent se setea inline (gana al CSS). */
-.pl-card.locked .pl-card-head,
-.pl-card.locked .pl-card-body { filter: grayscale(0.92); }
-.pl-card.locked.on {
-  opacity: 1;
-  border-color: var(--yellow); /* seleccionada pero bloqueada: borde de advertencia */
+/* --- canción BLOQUEADA (auto o sin-sync): no jugable, hay que sincronizar ---
+   Fiel al diseño nuevo: en vez de desaturar con filter, usamos la PALETA GRIS
+   explícita. El accent gris (#8A8590) se setea inline en menu.ts (gana al CSS),
+   así body/segs/bpm/flechas ya salen apagados; acá vestimos card/head/borde. */
+.pl-card.locked {
+  background: #0d0d10; /* cardBg locked (vs #101014 jugable) */
+  border-color: #26242c; /* borde no-seleccionada locked */
 }
+.pl-card.locked .pl-card-head {
+  background: #3a3740; /* headerBg locked */
+  color: #c9c5ce; /* headerFg locked */
+}
+.pl-card.locked .pl-card-title { opacity: 0.92; }
+/* badge de estado: opacity por estado (locked 0.85 / jugable 0.7) */
+.pl-card .pl-card-meta span:last-child { opacity: 0.7; }
+.pl-card.locked .pl-card-meta span:last-child { opacity: 0.85; }
+/* seleccionada pero bloqueada: borde SYNC amarillo (#FFD021), 3px */
+.pl-card.locked.on { border-color: var(--yellow); }
+
+/* franja de sincronizar (footer, solo bloqueadas): glyph ⟳ + SINCRONIZAR */
 .pl-lock {
   flex: none;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 9px 12px;
-  background: var(--yellow);
-  color: var(--ink);
+  padding: 11px 14px;
+  background: var(--yellow); /* #FFD021 */
+  color: #0b0b0c;
+  border-top: 2px solid #0b0b0c;
   font-family: var(--font-mono);
   font-weight: 700;
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
 }
-.pl-lock-ico { font-size: 12px; line-height: 1; }
-/* el CTA del actionbar pasa de "► JUGAR" (accent) a "🔒 SINCRONIZAR" (amarillo) */
+.pl-lock-ico { font-size: 13px; line-height: 1; }
+/* el CTA del actionbar pasa de "► JUGAR" (accent) a "⟳ SINCRONIZAR" (#FFD021) */
 .pl-play-cta.locked {
   background: var(--yellow);
   border-left-color: var(--yellow);
+  color: #0b0b0c;
 }
 
 .pl-empty {
@@ -594,6 +616,63 @@ body {
 @keyframes pl-audio-bar {
   0%, 100% { transform: scaleY(0.35); }
   50% { transform: scaleY(1); }
+}
+
+/* ===================== STREAM / HYPE LAYER (decorativo) =====================
+   Animaciones de la capa "live-stream" portadas FIEL del diseño nuevo (L40-48).
+   Todas las animaciones de esta capa son AUTÓNOMAS (timers internos en stream.ts),
+   NO reflejan datos reales del motor. Es 100% piel decorativa. */
+/* emote flotante que sube y se desvanece (emoteRise) */
+@keyframes pl-emote-rise {
+  0% { transform: translateY(0) scale(0.4) rotate(var(--r, 0deg)); opacity: 0; }
+  12% { transform: translateY(-18px) scale(1.15) rotate(var(--r, 0deg)); opacity: 1; }
+  78% { opacity: 1; }
+  100% { transform: translateY(-220px) scale(0.85) rotate(var(--r, 0deg)); opacity: 0; }
+}
+/* mensaje de chat entrando (chatIn) */
+@keyframes pl-chat-in {
+  0% { transform: translateX(-26px); opacity: 0; }
+  100% { transform: translateX(0); opacity: 1; }
+}
+/* mensaje de chat saliendo, colapsando su alto (chatOut) */
+@keyframes pl-chat-out {
+  0% { opacity: 1; max-height: 40px; }
+  100% { opacity: 0; max-height: 0; margin-bottom: 0; padding-top: 0; padding-bottom: 0; }
+}
+/* toast de alerta de stream entrando+saliendo (alertIn) */
+@keyframes pl-alert-in {
+  0% { transform: translateY(-26px) scale(0.92); opacity: 0; }
+  10% { transform: translateY(0) scale(1.04); opacity: 1; }
+  18% { transform: scale(1); }
+  88% { opacity: 1; transform: translateY(0); }
+  100% { transform: translateY(-14px); opacity: 0; }
+}
+/* hito de combo en el centro (comboPop) */
+@keyframes pl-combo-pop {
+  0% { transform: scale(0.3) rotate(-6deg); opacity: 0; }
+  45% { transform: scale(1.25) rotate(-6deg); opacity: 1; }
+  70% { transform: scale(0.95) rotate(-6deg); }
+  100% { transform: scale(1.05) rotate(-6deg); opacity: 0; }
+}
+/* parpadeo del fill de HYPE al estar al máximo (hypeFlash) */
+@keyframes pl-hype-flash {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+/* meneo de la llama 🔥 del HYPE (flameWobble) */
+@keyframes pl-flame-wobble {
+  0%, 100% { transform: scaleY(1) skewX(0deg); }
+  50% { transform: scaleY(1.18) skewX(3deg); }
+}
+/* scroll de la grilla en perspectiva (gridScroll) */
+@keyframes pl-grid-scroll {
+  0% { background-position: 0 0; }
+  100% { background-position: 0 80px; }
+}
+/* rotación genérica (spin) */
+@keyframes pl-spin {
+  0% { transform: rotate(0); }
+  100% { transform: rotate(360deg); }
 }
 
 /* ===================== GAMEPLAY (#screen-play) ===================== */
@@ -754,7 +833,8 @@ body {
 .pl-bracket-br { bottom: 10px; right: 10px; border-bottom: 3px solid var(--accent); border-right: 3px solid var(--accent); }
 .pl-reg { position: absolute; font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; }
 .pl-reg-top { top: 14px; left: 50%; transform: translateX(-50%); letter-spacing: 0.3em; color: #3a3a42; }
-.pl-reg-left { left: 14px; top: 50%; transform: translateY(-50%) rotate(-90deg); transform-origin: left center; letter-spacing: 0.28em; color: var(--line); white-space: nowrap; }
+/* .pl-reg-left (SYS.RHYTHM · AUDITION) eliminado: el diseño nuevo lo reemplaza por
+   la etiqueta "HYPE" del medidor del borde izquierdo (ver .pl-hype-label). */
 .pl-reg-tc { bottom: 14px; right: 18px; letter-spacing: 0.18em; color: #3a3a42; }
 
 /* HUD top */
@@ -764,6 +844,8 @@ body {
 .pl-hud-best, .pl-hud-combo { font-family: var(--font-display); font-size: clamp(52px, 6.5vw, 92px); line-height: 0.86; letter-spacing: -0.04em; text-shadow: 3px 3px 0 #000; }
 .pl-hud-best { color: var(--lime); }
 .pl-hud-combo { color: var(--accent); }
+/* combo reactivo (decorativo): stream.ts le anima scale/filter en cada "hit" */
+.pl-hud-combo-reactive { transform-origin: right center; transition: transform 0.12s ease, filter 0.2s ease; }
 .pl-hud-x { font-size: 0.5em; }
 
 /* center */
@@ -850,6 +932,120 @@ body {
   font-family: var(--font-mono); font-weight: 700; font-size: 12px; color: var(--paper-dim);
 }
 .pl-kbd-space { border-color: var(--lime); color: var(--lime); padding: 5px 16px; }
+
+/* ===================== STREAM / HYPE LAYER (decorativo, autónomo) =====================
+   Capa "live-stream / hype" portada del diseño nuevo (L182-289). TODO acá es
+   100% DECORATIVO y AUTÓNOMO: las animaciones las dispara stream.ts con timers
+   internos; NO están cableadas a datos del motor. z-index por encima del HUD
+   donde corresponde (emotes/alertas/flair) y por detrás en la grilla. */
+
+/* grilla en perspectiva reactiva (bgGridRef, L242). Detrás de todo. La opacity y
+   el color de fondo los maneja stream.ts (acento + latido decorativo). */
+.pl-bg-grid {
+  position: absolute; left: -12%; right: -12%; bottom: -22%; top: 34%;
+  z-index: 0; pointer-events: none;
+  background-image:
+    linear-gradient(var(--accent) 2px, transparent 2px),
+    linear-gradient(90deg, var(--accent) 2px, transparent 2px);
+  background-size: 84px 84px; opacity: 0.06;
+  transform: perspective(520px) rotateX(62deg); transform-origin: 50% 100%;
+  animation: pl-grid-scroll 1.4s linear infinite;
+}
+
+/* speed lines (combo alto). Opacity la maneja stream.ts (pulsos periódicos). */
+.pl-speed {
+  position: absolute; inset: 0; z-index: 6; pointer-events: none;
+  opacity: 0; transition: opacity 0.3s ease;
+  background: repeating-conic-gradient(from 0deg at 50% 46%, rgba(255, 255, 255, 0.16) 0deg 1.1deg, transparent 1.1deg 7deg);
+  -webkit-mask-image: radial-gradient(circle at 50% 46%, transparent 36%, #000 78%);
+  mask-image: radial-gradient(circle at 50% 46%, transparent 36%, #000 78%);
+}
+
+/* capa de emotes flotantes (emoteLayerRef, L185) */
+.pl-emote-layer { position: absolute; inset: 0; z-index: 8; pointer-events: none; overflow: hidden; }
+
+/* capa de toasts de alerta de stream (alertLayerRef, L188) */
+.pl-alert-layer {
+  position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+  z-index: 9; pointer-events: none;
+  display: flex; flex-direction: column; gap: 8px; align-items: center; width: max-content;
+}
+
+/* medidor de HYPE en el borde izquierdo (L266-270) */
+.pl-hype-track {
+  position: absolute; left: 0; top: 0; bottom: 0; width: 12px; z-index: 1;
+  display: flex; flex-direction: column-reverse;
+  background: #0b0b0c; border-right: 2px solid #1c1c22; overflow: hidden;
+}
+.pl-hype-fill {
+  width: 100%; height: 0%;
+  background: linear-gradient(0deg, #25e0ff, #ffd021 55%, #ff3b6b);
+  box-shadow: 0 0 16px rgba(255, 208, 33, 0.6);
+  transition: height 0.28s cubic-bezier(0.3, 0.8, 0.3, 1);
+}
+/* al máximo: parpadeo decorativo del fill */
+.pl-hype-fill.max { animation: pl-hype-flash 0.5s ease-in-out infinite; }
+.pl-hype-label {
+  position: absolute; left: 18px; top: 50%;
+  transform: translateY(-50%) rotate(-90deg); transform-origin: left center;
+  z-index: 1; font-family: var(--font-mono); font-weight: 700; font-size: 11px;
+  letter-spacing: 0.32em; color: var(--ghost-2); text-transform: uppercase;
+  white-space: nowrap; pointer-events: none;
+}
+.pl-hype-flame {
+  position: absolute; left: -4px; top: -2px; z-index: 2; font-size: 22px;
+  opacity: 0; transition: opacity 0.25s ease; pointer-events: none;
+  filter: drop-shadow(0 0 8px #ff7847);
+}
+/* visible al máximo, con meneo */
+.pl-hype-flame.on { opacity: 1; animation: pl-flame-wobble 0.6s ease-in-out infinite; }
+
+/* chat en vivo (chatLayerRef, L273) */
+.pl-chat-layer {
+  position: absolute; left: 26px; bottom: 18px; z-index: 2;
+  width: clamp(190px, 21vw, 280px);
+  display: flex; flex-direction: column; justify-content: flex-end; gap: 5px;
+  pointer-events: none; max-height: 38%; overflow: hidden;
+}
+.pl-chat-row {
+  display: flex; gap: 6px; align-items: baseline;
+  font-family: var(--font-mono); font-size: 12px; line-height: 1.25;
+  text-shadow: 1px 1px 0 #000; overflow: hidden;
+  animation: pl-chat-in 0.22s ease both;
+}
+.pl-chat-row.out { animation: pl-chat-out 0.4s ease forwards; }
+.pl-chat-user { font-weight: 700; white-space: nowrap; }
+.pl-chat-msg { color: #c9c5ce; }
+
+/* multiplicador (multRef, L284), debajo del combo */
+.pl-mult {
+  font-family: var(--font-mono); font-weight: 700; font-size: 14px; letter-spacing: 0.12em;
+  color: var(--yellow); text-align: right; margin-top: 2px;
+  opacity: 0; transition: opacity 0.2s ease;
+}
+
+/* hito de combo en el centro (comboFlairRef, L289) */
+.pl-combo-flair {
+  position: absolute; top: 30%; left: 50%; transform: translateX(-50%);
+  z-index: 8; pointer-events: none;
+  display: flex; justify-content: center; width: max-content;
+}
+.pl-combo-flair-item {
+  font-family: var(--font-display); font-size: clamp(40px, 6vw, 76px); line-height: 0.9;
+  color: var(--accent); text-shadow: 5px 5px 0 #000; text-transform: uppercase;
+  white-space: nowrap; animation: pl-combo-pop 1s ease forwards;
+}
+.pl-combo-flair-item .pl-combo-flair-x { font-size: 0.45em; }
+
+/* toast de alerta individual (spawnAlert) */
+.pl-alert {
+  color: var(--ink); font-family: var(--font-display); font-size: 15px; letter-spacing: 0.02em;
+  padding: 8px 16px; box-shadow: 4px 4px 0 #000; white-space: nowrap;
+  text-transform: uppercase; animation: pl-alert-in 2.4s ease forwards;
+}
+
+/* emote individual (spawnEmote) */
+.pl-emote { position: absolute; filter: drop-shadow(0 0 6px rgba(0, 0, 0, 0.6)); will-change: transform, opacity; }
 
 /* ===================== RESULT (#screen-result) ===================== */
 #screen-result { --accent: var(--lime); position: relative; align-items: center; justify-content: center; padding: 40px; overflow: auto; }

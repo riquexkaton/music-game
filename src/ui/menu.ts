@@ -72,8 +72,10 @@ export function initMenu(hooks: MenuHooks): MenuApi {
   const accentFor = (i: number): string => ACCENTS[i % ACCENTS.length]!;
   const bpmOf = (s: SongConfig): number | null =>
     s.tempoSource !== "none" && s.bpm > 0 ? Math.round(s.bpm) : null;
+  // Badge de estado (glyph + copy al estilo del diseño nuevo). Mantiene los 3 estados:
+  // manual jugable (✓ SYNC) vs las 2 bloqueadas (◆ AUTO / ◆ SIN SYNC, mismo glyph).
   const statusOf = (s: SongConfig): string =>
-    s.tempoSource === "manual" ? "SYNC ✓" : s.tempoSource === "auto" ? "AUTO" : "SIN SYNC";
+    s.tempoSource === "manual" ? "✓ SYNC" : s.tempoSource === "auto" ? "◆ AUTO" : "◆ SIN SYNC";
   /** Solo las sincronizadas A MANO son jugables: el tempo auto deriva y come misses
    *  (un error de 0.3 BPM ya son ~280 ms de desfase a los 2 min). */
   const isPlayable = (s: SongConfig): boolean => s.tempoSource === "manual";
@@ -139,8 +141,12 @@ export function initMenu(hooks: MenuHooks): MenuApi {
     list.forEach((song, i) => {
       const feature = i % 4 === 0;
       const card = document.createElement("div");
-      card.className = `pl-card${feature ? " feature" : ""}${i === sel ? " on" : ""}${isPlayable(song) ? "" : " locked"}`;
-      card.style.setProperty("--accent", accentFor(i));
+      const playable = isPlayable(song);
+      card.className = `pl-card${feature ? " feature" : ""}${i === sel ? " on" : ""}${playable ? "" : " locked"}`;
+      // Card jugable: accent vivo de la canción. Bloqueada: accent gris del diseño
+      // (#8A8590) seteado inline para que body/segs/bpm/flechas se vean apagados
+      // (el accent inline gana sobre el CSS; así replicamos los valores del diseño).
+      card.style.setProperty("--accent", playable ? accentFor(i) : "#8A8590");
       card.style.animationDelay = `${120 + i * 75}ms`;
       card.dataset.idx = String(i);
       const bpm = bpmOf(song);
@@ -164,7 +170,7 @@ export function initMenu(hooks: MenuHooks): MenuApi {
             <div class="pl-segs">${segs}</div>
           </div>
         </div>
-        ${isPlayable(song) ? "" : `<div class="pl-lock"><span class="pl-lock-ico">🔒</span> SINCRONIZAR</div>`}`;
+        ${playable ? "" : `<div class="pl-lock"><span class="pl-lock-ico">⟳</span> SINCRONIZAR</div>`}`;
       card.addEventListener("click", () => pick(i));
       masonry.appendChild(card);
     });
@@ -192,7 +198,7 @@ export function initMenu(hooks: MenuHooks): MenuApi {
       <div class="pl-grow"><span class="pl-scroll-hint">DESLIZÁ / SCROLL ↔ PARA EXPLORAR</span></div>
       ${isPlayable(song)
         ? `<button class="pl-play-cta" id="pl-play-cta"><span>►</span><span>JUGAR</span></button>`
-        : `<button class="pl-play-cta locked" id="pl-play-cta"><span>🔒</span><span>SINCRONIZAR</span></button>`}`;
+        : `<button class="pl-play-cta locked" id="pl-play-cta"><span>⟳</span><span>SINCRONIZAR</span></button>`}`;
     $("pl-play-cta").addEventListener("click", (e) => {
       e.stopPropagation();
       confirmPlay();
