@@ -15,6 +15,8 @@ export interface MenuHooks {
   onSelect: (song: SongConfig) => void;
   /** El usuario confirmó: arrancar el juego con esa canción. */
   onPlay: (song: SongConfig) => void;
+  /** El usuario quiere sincronizar una canción bloqueada: llevarlo al editor. */
+  onSync: (song: SongConfig) => void;
 }
 
 export interface MenuApi {
@@ -72,6 +74,9 @@ export function initMenu(hooks: MenuHooks): MenuApi {
     s.tempoSource !== "none" && s.bpm > 0 ? Math.round(s.bpm) : null;
   const statusOf = (s: SongConfig): string =>
     s.tempoSource === "manual" ? "SYNC ✓" : s.tempoSource === "auto" ? "AUTO" : "SIN SYNC";
+  /** Solo las sincronizadas A MANO son jugables: el tempo auto deriva y come misses
+   *  (un error de 0.3 BPM ya son ~280 ms de desfase a los 2 min). */
+  const isPlayable = (s: SongConfig): boolean => s.tempoSource === "manual";
   const segsOf = (s: SongConfig): number => {
     const b = bpmOf(s);
     if (!b) return 0;
@@ -134,7 +139,7 @@ export function initMenu(hooks: MenuHooks): MenuApi {
     list.forEach((song, i) => {
       const feature = i % 4 === 0;
       const card = document.createElement("div");
-      card.className = `pl-card${feature ? " feature" : ""}${i === sel ? " on" : ""}`;
+      card.className = `pl-card${feature ? " feature" : ""}${i === sel ? " on" : ""}${isPlayable(song) ? "" : " locked"}`;
       card.style.setProperty("--accent", accentFor(i));
       card.style.animationDelay = `${120 + i * 75}ms`;
       card.dataset.idx = String(i);
@@ -158,7 +163,8 @@ export function initMenu(hooks: MenuHooks): MenuApi {
             <div><div class="pl-bpm-label">BPM</div><div class="pl-bpm">${bpm ?? "—"}</div></div>
             <div class="pl-segs">${segs}</div>
           </div>
-        </div>`;
+        </div>
+        ${isPlayable(song) ? "" : `<div class="pl-lock"><span class="pl-lock-ico">🔒</span> SINCRONIZAR</div>`}`;
       card.addEventListener("click", () => pick(i));
       masonry.appendChild(card);
     });
@@ -184,7 +190,9 @@ export function initMenu(hooks: MenuHooks): MenuApi {
         <div class="pl-sel-sub">${statusOf(song)}${bpm ? ` · ${bpm} BPM` : ""}</div>
       </div>
       <div class="pl-grow"><span class="pl-scroll-hint">DESLIZÁ / SCROLL ↔ PARA EXPLORAR</span></div>
-      <button class="pl-play-cta" id="pl-play-cta"><span>►</span><span>JUGAR</span></button>`;
+      ${isPlayable(song)
+        ? `<button class="pl-play-cta" id="pl-play-cta"><span>►</span><span>JUGAR</span></button>`
+        : `<button class="pl-play-cta locked" id="pl-play-cta"><span>🔒</span><span>SINCRONIZAR</span></button>`}`;
     $("pl-play-cta").addEventListener("click", (e) => {
       e.stopPropagation();
       confirmPlay();
@@ -219,6 +227,11 @@ export function initMenu(hooks: MenuHooks): MenuApi {
     const song = songs()[sel];
     if (!song) return;
     hooks.onSelect(song);
+    // Bloqueada (sin sync manual): en vez de jugar mal, la mandamos a sincronizar.
+    if (!isPlayable(song)) {
+      hooks.onSync(song);
+      return;
+    }
     transitionToGame(song);
   }
 

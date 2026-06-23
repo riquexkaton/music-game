@@ -65,6 +65,7 @@ let editingRests: Rest[] = [];
 let totalBeats = 0; // largo de la canción en beats (para mapear la barra)
 let pendingStartBeat: number | null = null; // primer clic de un descanso a medio marcar
 let syncCollector: AnchorCollector | null = null;
+let syncIntent = false; // venimos del "🔒 SINCRONIZAR" del SONG SELECT: orientar al sync
 
 let score = 0;
 let combo = 0;
@@ -346,18 +347,19 @@ async function ensureSongReady(song: SongConfig): Promise<{ bpm: number; offset:
   if (tempo) return tempo;
 
   statusEl.textContent = "Analizando BPM… (una sola vez por canción)";
-  let bpm = 120;
-  let offset = 0;
   try {
     const g = await guess(currentBuffer);
-    bpm = (g as { tempo?: number }).tempo ?? g.bpm;
-    offset = g.offset;
+    const bpm = (g as { tempo?: number }).tempo ?? g.bpm;
+    const offset = g.offset;
+    // 'auto' le sirve al EDITOR como referencia para dibujar la barra; NO habilita
+    // jugar (solo 'manual' es jugable). Detectar acá solo orienta el sync manual.
+    persistSong(song, { bpm, offset, tempoSource: "auto" });
+    return { bpm, offset };
   } catch {
-    bpm = 120;
-    offset = 0;
+    // La detección FALLÓ: no persistimos un tempo placebo (120/0) como si fuera real.
+    // La canción queda 'none' (bloqueada); 120/0 es solo referencia visual del editor.
+    return { bpm: 120, offset: 0 };
   }
-  persistSong(song, { bpm, offset, tempoSource: "auto" });
-  return { bpm, offset };
 }
 
 function persistSong(song: SongConfig, patch: Partial<SongConfig>): void {
@@ -520,6 +522,12 @@ async function openEditor(): Promise<void> {
       : "Detecté el BPM solo (puede errar). Para que la barra sea exacta, dale Sync manual primero.";
   renderTimeline();
   renderRestList();
+  if (syncIntent) {
+    syncIntent = false;
+    editorHintEl.textContent =
+      `🔒 "${song.title}" no está sincronizada. Tocá ▶ Sync manual y palmeá el ritmo de punta a punta para desbloquearla y poder jugarla.`;
+    syncBtn.focus();
+  }
 }
 
 // --- la BARRA de marcado (timeline) ---
@@ -1013,6 +1021,11 @@ const menu = initMenu({
   onPlay: (song) => {
     selectSong(song);
     void play("play");
+  },
+  onSync: (song) => {
+    syncIntent = true;
+    selectSong(song);
+    location.hash = "#editor"; // dispara route() → openEditor() con el hint de sync
   },
 });
 
