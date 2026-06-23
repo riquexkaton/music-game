@@ -701,6 +701,9 @@ function maybeSpawnPending(): void {
 function advanceBar(): void {
   activeBar = null;
   tracker = null;
+  // barStep es FIJO y múltiplo de BEATS_PER_BAR (ver SPACING_BEATS en rampAt) y el
+  // primer commit cae en grilla, así que por inducción cada commit aterriza en un
+  // downbeat. NO envolver en gridBeat: redondea hacia arriba y desalinearía.
   const immediate = nextBarCommit + rampAt(currentIntensity(), activePreset()).barStep;
   const next = skipRests(immediate);
   scheduleBar(next, next > immediate ? "Descansá 😮‍💨" : "");
