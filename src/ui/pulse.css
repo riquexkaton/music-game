@@ -583,6 +583,13 @@ body {
   55% { transform: scale(0.91); }
   100% { transform: scale(1); }
 }
+/* entrada de cada tecla cuando aparece una secuencia FRESCA (stagger por índice).
+   Sube desde abajo + escala, suave. NO reflowea: solo transform/opacity. */
+@keyframes pl-keycap-enter {
+  0% { transform: translateY(14px) scale(0.82); opacity: 0; }
+  60% { transform: translateY(0) scale(1.05); opacity: 1; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
 /* flecha equivocada (missFlash del diseño) */
 @keyframes pl-miss-flash {
   0% { transform: scale(1.22); opacity: 1; }
@@ -600,6 +607,20 @@ body {
 /* bloque DESCANSO entrando (breakIn del diseño) */
 @keyframes pl-break-in {
   0% { transform: scale(0.85); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+/* cuenta regresiva del intro: golpe de cada número (pop/scale + fade). */
+@keyframes pl-count-pop {
+  0% { transform: scale(1.3); opacity: 0; }
+  45% { transform: scale(0.96); opacity: 1; }
+  72% { transform: scale(1.02); }
+  100% { transform: scale(1); opacity: 1; }
+}
+/* "¡VAMOS!": golpe más fuerte (entra grande, rebota y empieza a desvanecerse). */
+@keyframes pl-count-go {
+  0% { transform: scale(1.5); opacity: 0; }
+  35% { transform: scale(0.94); opacity: 1; }
+  60% { transform: scale(1.08); }
   100% { transform: scale(1); opacity: 1; }
 }
 /* anillos de pulso por BPM (beatRingSq) + core (beatCore) */
@@ -676,7 +697,9 @@ body {
 }
 
 /* ===================== GAMEPLAY (#screen-play) ===================== */
-#screen-play { background: var(--ink-deep); --accent: var(--lime); }
+/* overflow:hidden = nada de la piel (emotes, stamps, FX, glow) desborda el
+   viewport ni saca scrollbars. Todo el movimiento queda CLAVADO dentro del field. */
+#screen-play { background: var(--ink-deep); --accent: var(--lime); overflow: hidden; }
 
 /* --- song bar --- */
 .pl-songbar {
@@ -868,8 +891,36 @@ body {
 .pl-break-fill { height: 100%; width: 100%; background: var(--yellow); }
 .pl-break-hint { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.16em; color: var(--ghost); text-transform: uppercase; }
 
+/* --- CUENTA REGRESIVA del intro (3·2·1·¡VAMOS!) ---
+   Overlay central sobre TODO el field (no sólo el slot central): durante el intro el
+   centro está libre (sin descanso ni judgment), así que ocupa la pantalla y pega
+   fuerte. z-index 8 = por encima del HUD/personaje/flash, debajo del FX canvas (7 es
+   para partículas de acierto, que en el intro no existen). pointer-events:none: no
+   roba clics. La visibilidad la maneja el atributo [hidden] (game.setCountdown). */
+.pl-countdown {
+  position: absolute; inset: 0; z-index: 8; pointer-events: none;
+  display: flex; align-items: center; justify-content: center;
+}
+.pl-countdown[hidden] { display: none; }
+.pl-countdown-num {
+  font-family: var(--font-display);
+  font-size: clamp(90px, 16vw, 200px); line-height: 0.82;
+  letter-spacing: -0.04em; text-transform: uppercase;
+  color: var(--paper); text-shadow: 8px 8px 0 #000, 0 0 60px rgba(0, 0, 0, 0.55);
+  animation: pl-count-pop 0.46s cubic-bezier(0.2, 0.75, 0.2, 1) both;
+}
+/* "¡VAMOS!" — acento lima, más impacto (golpe + glow del acento). */
+.pl-countdown-num.go {
+  color: var(--lime);
+  text-shadow: 9px 9px 0 #000, 0 0 70px color-mix(in srgb, var(--lime) 55%, transparent);
+  animation: pl-count-go 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
 /* arrows */
-.pl-arrows-row { display: flex; gap: 16px; flex: none; justify-content: center; }
+/* min-height = alto REAL del keycap (78px + borde 4px×2 = 86px). RESERVA el slot
+   para que NO colapse a 0 cuando la secuencia se vacía (entre barras / descansos):
+   así timing y score quedan CLAVADOS, sin salto vertical. */
+.pl-arrows-row { display: flex; gap: 16px; flex: none; justify-content: center; align-items: center; min-height: 86px; }
 .pl-keycap {
   width: 78px; height: 78px; border: 4px solid var(--line);
   display: flex; align-items: center; justify-content: center;
@@ -885,6 +936,15 @@ body {
 .pl-keycap-wrong { background: var(--red); color: var(--ink); border-color: var(--red); box-shadow: 4px 4px 0 #000; animation: pl-miss-flash 0.5s ease both; }
 /* recién pulsada: punch (se aplica sobre 'done') */
 .pl-keycap-punch { animation: pl-key-punch 0.26s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+/* entrada de secuencia fresca (game.ts agrega la clase + animation-delay por índice) */
+.pl-keycap-enter { animation: pl-keycap-enter 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+/* la PRIMERA tecla de una secuencia fresca llega como 'current' (glow infinito):
+   componemos AMBAS animaciones (entra y luego latea). Doble clase = más específico
+   que .pl-keycap-current solo, así gana sí o sí sin depender del orden de fuente. */
+.pl-keycap-current.pl-keycap-enter {
+  animation: pl-keycap-enter 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both,
+    pl-glow 0.7s ease-in-out infinite;
+}
 
 /* timing bar */
 .pl-timing {
@@ -1000,12 +1060,17 @@ body {
 /* visible al máximo, con meneo */
 .pl-hype-flame.on { opacity: 1; animation: pl-flame-wobble 0.6s ease-in-out infinite; }
 
-/* chat en vivo (chatLayerRef, L273) */
+/* chat en vivo (chatLayerRef, L273) — feed APILADO: varios mensajes a la vez,
+   anclado abajo, los nuevos entran por abajo y empujan; los viejos suben y se
+   desvanecen (máscara superior) hasta evictarse. ~5–6 filas visibles. */
 .pl-chat-layer {
   position: absolute; left: 26px; bottom: 18px; z-index: 2;
   width: clamp(190px, 21vw, 280px);
-  display: flex; flex-direction: column; justify-content: flex-end; gap: 5px;
-  pointer-events: none; max-height: 38%; overflow: hidden;
+  display: flex; flex-direction: column; justify-content: flex-end; gap: 4px;
+  pointer-events: none; max-height: 46%; overflow: hidden;
+  /* fundido superior: las filas viejas se diluyen al subir, como un chat que scrollea. */
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 26%, #000 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 26%, #000 100%);
 }
 .pl-chat-row {
   display: flex; gap: 6px; align-items: baseline;
@@ -1015,7 +1080,7 @@ body {
 }
 .pl-chat-row.out { animation: pl-chat-out 0.4s ease forwards; }
 .pl-chat-user { font-weight: 700; white-space: nowrap; }
-.pl-chat-msg { color: #c9c5ce; }
+.pl-chat-msg { color: #c9c5ce; word-break: break-word; }
 
 /* multiplicador (multRef, L284), debajo del combo */
 .pl-mult {
@@ -1091,3 +1156,545 @@ body {
   padding: 14px 24px; cursor: pointer; transition: border-color 0.12s, background 0.12s, color 0.12s;
 }
 .pl-tolist:hover { border-color: var(--paper); background: var(--surface); color: var(--paper); }
+
+/* ============================================================================
+   PULSE EDITOR (#screen-editor) — portado de claude.ai/design "Pulse Editor".
+   Brutalist: bordes 2px, sombras duras, radius 0. Fase 1 = andamiaje (la onda,
+   el transport en vivo y los paneles funcionales son Fase 2).
+   --ed-accent: acento de la canción en edición (lo setea editor.ts).
+   ============================================================================ */
+#screen-editor { --ed-accent: var(--lime); overflow: hidden; }
+#screen-editor.hidden { display: none !important; }
+
+/* scrollbars brutalist (igual que el diseño) */
+.ed-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+.ed-scroll::-webkit-scrollbar-track { background: var(--ink); }
+.ed-scroll::-webkit-scrollbar-thumb { background: var(--line); border: 2px solid var(--ink); }
+.ed-scroll::-webkit-scrollbar-thumb:hover { background: #3f3f48; }
+
+.ple-file-input { display: none; }
+
+.ple-shell {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+  background: var(--ink); color: var(--paper);
+  font-family: var(--font-mono);
+  overflow: hidden;
+}
+
+/* ---------- system bar (acento del editor en el marquee) ---------- */
+.ple-marquee { animation-duration: 30s; }
+
+/* ---------- header ---------- */
+.ple-header {
+  flex: none; display: flex; align-items: stretch;
+  border-bottom: 2px solid var(--line); background: var(--ink);
+}
+.ple-header-logo {
+  padding: 14px 22px; border-right: 2px solid var(--line);
+  display: flex; align-items: center; gap: 14px;
+}
+.ple-logo-word {
+  font-family: var(--font-display); font-size: 22px;
+  letter-spacing: -0.03em; text-transform: uppercase; line-height: 1;
+}
+.ple-logo-dot { color: var(--lime); }
+.ple-header-sub {
+  padding: 14px 22px; display: flex; align-items: center;
+  font-size: 11px; letter-spacing: 0.16em; color: var(--ghost); text-transform: uppercase;
+}
+.ple-header-kbd {
+  padding: 14px 22px; display: flex; align-items: center; gap: 12px;
+  font-size: 11px; letter-spacing: 0.12em; color: var(--ghost-2); text-transform: uppercase;
+}
+.ple-kbd {
+  font-weight: 700; border: 2px solid var(--line);
+  padding: 4px 12px; color: var(--paper-dim);
+}
+
+/* ---------- main split ---------- */
+.ple-main { flex: 1; min-height: 0; display: flex; }
+
+/* ===== LEFT: track list ===== */
+.ple-tracks {
+  width: 340px; flex: none;
+  border-right: 2px solid var(--line); background: var(--ink);
+  display: flex; flex-direction: column; min-height: 0;
+}
+.ple-tracks-head {
+  flex: none; display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 18px; border-bottom: 2px solid var(--line);
+}
+.ple-tracks-title {
+  font-family: var(--font-display); font-size: 15px;
+  letter-spacing: -0.01em; text-transform: uppercase;
+}
+.ple-tracks-count {
+  font-size: 10px; letter-spacing: 0.14em; color: var(--ghost);
+  border: 2px solid var(--line); padding: 3px 9px;
+}
+.ple-tracks-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 14px 8px; }
+.ple-tracks-foot { flex: none; border-top: 2px solid var(--line); padding: 14px; }
+
+.ple-upload-btn {
+  width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px;
+  padding: 14px; border: 2px dashed #3f3f48; background: var(--ink); color: var(--paper-dim);
+  cursor: pointer; font-family: var(--font-mono); font-weight: 700;
+  font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase;
+  transition: border-color 0.12s, color 0.12s;
+}
+.ple-upload-btn:hover { border-color: var(--lime); color: var(--lime); }
+.ple-upload-plus { font-size: 15px; line-height: 1; }
+.ple-upload-note {
+  font-size: 10px; letter-spacing: 0.08em; color: var(--ghost-2);
+  margin-top: 10px; text-align: center;
+}
+
+/* track cards */
+.ple-track-card {
+  --card-accent: var(--lime);
+  padding: 14px 15px; margin-bottom: 12px; cursor: pointer;
+  background: #0d0d10; border: 2px solid var(--line-soft);
+  transition: border-color 0.12s, box-shadow 0.12s, transform 0.12s;
+  animation: pl-fade-up 0.4s ease both;
+}
+.ple-track-card:hover { border-color: #3a3a44; }
+.ple-track-card.on {
+  background: var(--surface);
+  border-color: var(--card-accent);
+  box-shadow: 5px 5px 0 #000;
+  transform: translate(-1px, -1px);
+}
+.ple-track-top {
+  display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;
+}
+.ple-track-num { font-size: 10px; letter-spacing: 0.16em; color: var(--ghost); }
+.ple-track-card.on .ple-track-num { color: var(--card-accent); }
+.ple-track-top-right { display: flex; align-items: center; gap: 8px; }
+.ple-track-badge {
+  font-family: var(--font-mono); font-weight: 700; font-size: 9px;
+  letter-spacing: 0.12em; padding: 3px 7px; border: 1.5px solid;
+}
+.ple-track-badge.synced { border-color: var(--card-accent); color: var(--card-accent); }
+.ple-track-badge.auto { border-color: var(--yellow); color: var(--yellow); }
+.ple-track-del {
+  width: 20px; height: 20px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  border: 1.5px solid var(--line); color: var(--ghost-2);
+  cursor: pointer; font-size: 10px; transition: all 0.1s;
+}
+.ple-track-del:hover { background: var(--red); color: var(--ink); border-color: var(--red); }
+.ple-track-title {
+  font-family: var(--font-display); font-size: 15px; line-height: 1.05;
+  letter-spacing: -0.01em; text-transform: uppercase; color: #c9c5ce; text-wrap: balance;
+}
+.ple-track-card.on .ple-track-title { color: var(--paper); }
+.ple-track-meta {
+  display: flex; align-items: center; gap: 8px; margin-top: 9px;
+  font-size: 10px; letter-spacing: 0.08em; color: var(--ghost); text-transform: uppercase;
+}
+.ple-track-bpm { color: var(--card-accent); font-weight: 700; }
+.ple-track-sep { color: var(--line); }
+.ple-track-breaks { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+.ple-track-dot { width: 9px; height: 9px; flex: none; background: var(--line); }
+.ple-track-dot.on { background: var(--yellow); }
+.ple-track-break-label {
+  font-size: 10px; letter-spacing: 0.1em; color: var(--ghost-2); text-transform: uppercase;
+}
+
+/* ===== RIGHT: workspace ===== */
+.ple-workspace { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+
+/* shared field label */
+.ple-field-label { font-size: 10px; letter-spacing: 0.14em; color: var(--ghost); }
+.ple-mb9 { margin-bottom: 9px; }
+.ple-mb18 { margin-bottom: 18px; }
+.ple-mb20 { margin-bottom: 20px; }
+.ple-mt10 { margin-top: 10px; }
+.ple-mt18 { margin-top: 18px; }
+
+/* song header */
+.ple-song-header {
+  flex: none; display: flex; align-items: stretch;
+  border-bottom: 2px solid var(--line); background: var(--ink);
+}
+.ple-song-accent { width: 12px; flex: none; background: var(--ed-accent); }
+.ple-song-id {
+  padding: 14px 20px; border-right: 2px solid var(--line);
+  display: flex; flex-direction: column; justify-content: center; min-width: 0; flex: 1;
+}
+.ple-song-title {
+  font-family: var(--font-display); font-size: clamp(18px, 2vw, 24px);
+  letter-spacing: -0.02em; text-transform: uppercase; line-height: 1.05;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ple-song-meta {
+  font-size: 11px; letter-spacing: 0.12em; color: var(--ghost);
+  text-transform: uppercase; margin-top: 5px;
+}
+.ple-song-tempo {
+  padding: 14px 22px; border-right: 2px solid var(--line);
+  display: flex; flex-direction: column; justify-content: center;
+}
+.ple-song-tempo .ple-field-label { letter-spacing: 0.16em; margin-bottom: 4px; }
+.ple-tempo-row { display: flex; align-items: baseline; gap: 6px; }
+.ple-tempo-bpm {
+  font-family: var(--font-display); font-size: 26px;
+  letter-spacing: -0.02em; color: var(--ed-accent);
+}
+.ple-tempo-unit { font-size: 10px; color: var(--ghost); }
+.ple-song-diff {
+  padding: 14px 22px; display: flex; flex-direction: column; justify-content: center; gap: 7px;
+}
+.ple-song-diff .ple-field-label { letter-spacing: 0.16em; }
+.ple-diff-btns { display: flex; gap: 7px; }
+.ple-diff-btn {
+  padding: 6px 11px; border: 2px solid var(--line); background: transparent; color: var(--paper-dim);
+  cursor: pointer; font-family: var(--font-mono); font-weight: 700;
+  font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
+  transition: border-color 0.1s, background 0.1s, color 0.1s;
+}
+.ple-diff-btn:hover { border-color: var(--paper-dim); }
+.ple-diff-btn.on { border-color: var(--ed-accent); background: var(--ed-accent); color: var(--ink); }
+.ple-song-status {
+  padding: 14px 22px; border-left: 2px solid var(--line); display: flex; align-items: center;
+}
+.ple-status-pill {
+  --pill-color: var(--yellow);
+  font-family: var(--font-mono); font-weight: 700; font-size: 11px;
+  letter-spacing: 0.12em; padding: 7px 12px; white-space: nowrap;
+  border: 2px solid var(--pill-color); color: var(--pill-color);
+}
+
+/* waveform + transport */
+.ple-wave-section { flex: none; background: var(--ink-deep); border-bottom: 2px solid var(--line); }
+.ple-transport {
+  display: flex; align-items: center; gap: 14px;
+  padding: 11px 18px; border-bottom: 2px solid #161620;
+}
+.ple-play-btn {
+  width: 44px; height: 38px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  border: 2px solid var(--ed-accent); background: var(--ed-accent); color: var(--ink);
+  cursor: pointer; font-family: var(--font-display); font-size: 15px; box-shadow: 3px 3px 0 #000;
+  transition: filter 0.1s;
+}
+.ple-play-btn:hover { filter: brightness(1.08); }
+.ple-play-btn.playing { font-size: 12px; }
+.ple-restart-btn {
+  width: 38px; height: 38px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  border: 2px solid var(--line); background: transparent; color: var(--paper-dim);
+  cursor: pointer; font-size: 14px; transition: border-color 0.1s, color 0.1s;
+}
+.ple-restart-btn:hover { border-color: var(--paper); color: var(--paper); }
+.ple-clock { display: flex; align-items: baseline; gap: 6px; font-variant-numeric: tabular-nums; }
+.ple-clock-now {
+  font-family: var(--font-display); font-size: 20px; letter-spacing: -0.01em; color: var(--paper);
+}
+.ple-clock-total { font-size: 12px; color: var(--ghost-2); }
+.ple-mark-pill {
+  font-family: var(--font-mono); font-weight: 700; font-size: 10px;
+  letter-spacing: 0.12em; padding: 7px 12px; text-transform: uppercase;
+  border: 2px solid var(--line); color: var(--ghost);
+}
+.ple-mark-pill.marking { border-color: var(--yellow); color: var(--yellow); }
+
+/* wave box (Fase 2 dibuja la onda en el canvas + posiciona overlays) */
+.ple-wave-box {
+  position: relative; height: 220px; cursor: text;
+  background: var(--ink-deep); user-select: none; overflow: hidden;
+}
+.ple-wave-box.marking { cursor: crosshair; }
+.ple-wave-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.ple-wave-overlays { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+.ple-playhead {
+  position: absolute; top: -3px; bottom: -3px; left: 0%; width: 3px;
+  background: var(--paper); box-shadow: 0 0 12px rgba(255, 255, 255, 0.7);
+  transform: translateX(-50%); z-index: 4; pointer-events: none;
+}
+.ple-wave-placeholder {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 11px; letter-spacing: 0.18em; color: var(--ghost-2);
+  text-transform: uppercase; pointer-events: none; z-index: 1;
+}
+/* overlays de descansos sobre la onda (Fase 2: EditorWave los puebla) */
+.ple-wave-rest {
+  position: absolute; top: 0; bottom: 0;
+  background: rgba(255, 208, 33, 0.14);
+  background-image: repeating-linear-gradient(45deg, rgba(255, 208, 33, 0.45) 0 6px, transparent 6px 12px);
+  border-left: 2px solid var(--yellow); border-right: 2px solid var(--yellow);
+}
+.ple-wave-rest-label {
+  position: absolute; top: 4px; left: 5px;
+  font-size: 9px; letter-spacing: 0.1em; color: var(--yellow); font-weight: 700;
+  text-shadow: 1px 1px 0 #000; white-space: nowrap;
+}
+.ple-wave-pending {
+  position: absolute; top: 0; bottom: 0; width: 2px;
+  background: var(--yellow); box-shadow: 0 0 10px rgba(255, 208, 33, 0.7);
+}
+.ple-wave-pending-label {
+  position: absolute; top: 3px; left: 4px;
+  font-size: 9px; font-weight: 700; color: var(--yellow);
+  white-space: nowrap; text-shadow: 1px 1px 0 #000;
+}
+/* INTRO · SIN JUEGO: zona de 0 → gameStart, apagada + rayado gris (no hay flechas) */
+.ple-wave-intro {
+  position: absolute; top: 0; bottom: 0; left: 0;
+  background: rgba(7, 7, 9, 0.62);
+  background-image: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.04) 0 6px, transparent 6px 12px);
+  z-index: 1; pointer-events: none;
+}
+.ple-wave-intro-label {
+  position: absolute; top: 4px; left: 6px;
+  font-size: 9px; letter-spacing: 0.12em; color: var(--ghost); font-weight: 700;
+  text-shadow: 1px 1px 0 #000; white-space: nowrap;
+}
+/* ▶ INICIO JUEGO: línea rosa donde arrancan las flechas */
+.ple-wave-gamestart {
+  position: absolute; top: 0; bottom: 0; width: 2px;
+  background: var(--magenta); box-shadow: 0 0 10px rgba(255, 46, 154, 0.7); z-index: 3;
+}
+.ple-wave-gamestart-label {
+  position: absolute; bottom: 22px; left: 4px;
+  font-size: 9px; font-weight: 700; color: var(--magenta);
+  white-space: nowrap; text-shadow: 1px 1px 0 #000;
+}
+
+/* ruler (Fase 2: EditorWave puebla ticks .ple-ruler-tick) */
+.ple-ruler { position: relative; height: 24px; border-top: 2px solid #161620; background: var(--ink); }
+.ple-ruler-tick {
+  position: absolute; top: 6px; font-size: 10px; letter-spacing: 0.1em;
+  color: var(--ghost-2); font-family: var(--font-mono); transform: translateX(-50%);
+}
+.ple-ruler-tick:first-child { transform: none; } /* el 0:00 pegado a la izquierda */
+.ple-ruler-tick-end { right: 8px; left: auto; transform: none; }
+
+/* ---------- tool panels (grid de 3) ---------- */
+.ple-panels-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.ple-panels {
+  display: grid; grid-template-columns: 1fr 1fr 1.15fr; border-bottom: 2px solid var(--line);
+}
+.ple-panel { padding: 20px 20px 22px; background: var(--ink); }
+.ple-panel-bordered { border-right: 2px solid var(--line); }
+.ple-panel-breaks { display: flex; flex-direction: column; min-height: 0; }
+.ple-panel-head { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+.ple-panel-head-spread { justify-content: space-between; margin-bottom: 16px; }
+.ple-panel-head-left { display: flex; align-items: center; gap: 10px; }
+.ple-panel-num { font-family: var(--font-display); font-size: 13px; }
+.ple-panel-num.lime { color: var(--lime); }
+.ple-panel-num.yellow { color: var(--yellow); }
+.ple-panel-title {
+  font-family: var(--font-display); font-size: 15px; text-transform: uppercase; letter-spacing: -0.01em;
+}
+.ple-panel-note {
+  font-size: 10px; letter-spacing: 0.06em; color: var(--ghost-2); line-height: 1.6;
+}
+.ple-panel-note strong { color: var(--paper-dim); }
+
+/* panel 01 Tempo */
+.ple-detect-btn {
+  width: 100%; display: flex; align-items: center; justify-content: center; gap: 9px;
+  padding: 11px; border: 2px solid var(--line); background: var(--surface); color: var(--paper-dim);
+  cursor: pointer; font-family: var(--font-mono); font-weight: 700;
+  font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 18px;
+  transition: border-color 0.1s, color 0.1s;
+}
+.ple-detect-btn:hover { border-color: var(--cyan); color: var(--cyan); }
+.ple-stepper { display: flex; align-items: stretch; border: 2px solid var(--line); }
+.ple-step-btn {
+  width: 42px; flex: none; border: 0; background: var(--surface); color: var(--paper);
+  cursor: pointer; font-family: var(--font-display); font-size: 18px; transition: background 0.1s;
+}
+.ple-step-btn:first-child { border-right: 2px solid var(--line); }
+.ple-step-btn:last-child { border-left: 2px solid var(--line); }
+.ple-step-btn:hover { background: #1c1c22; }
+.ple-step-val {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  padding: 10px 0; background: var(--ink);
+  font-family: var(--font-display); font-size: 24px; letter-spacing: -0.01em;
+}
+.ple-tap-btn {
+  width: 100%; display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 13px; border: 2px solid var(--magenta); background: var(--magenta); color: var(--ink);
+  cursor: pointer; box-shadow: 3px 3px 0 #000; margin-bottom: 10px; transition: filter 0.1s;
+}
+.ple-tap-btn:hover { filter: brightness(1.06); }
+.ple-tap-word { font-family: var(--font-display); font-size: 16px; letter-spacing: 0.04em; }
+.ple-tap-readout { font-size: 11px; color: var(--ink); opacity: 0.7; }
+.ple-apply-tap-btn {
+  width: 100%; padding: 10px; border: 2px solid var(--line);
+  background: transparent; color: var(--ghost-2);
+  font-family: var(--font-mono); font-weight: 700; font-size: 11px;
+  letter-spacing: 0.1em; text-transform: uppercase; cursor: not-allowed; transition: all 0.1s;
+}
+.ple-apply-tap-btn:not(:disabled) { border-color: var(--lime); color: var(--lime); cursor: pointer; }
+
+/* panel 02 Sync */
+.ple-sync-block {
+  border: 2px solid var(--line); background: var(--surface);
+  padding: 14px 16px; margin-bottom: 8px;
+  transition: border-color 0.12s;
+}
+.ple-sync-block.active { border-color: var(--lime); }
+.ple-sync-readout { display: grid; gap: 7px; margin-bottom: 12px; }
+.ple-sync-row {
+  font-size: 11px; letter-spacing: 0.08em; color: var(--ghost); text-transform: uppercase;
+  display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+}
+.ple-sync-row b { font-family: var(--font-display); font-size: 15px; color: var(--paper); letter-spacing: -0.01em; }
+.ple-sync-count { color: var(--ghost-2); font-size: 10px; }
+.ple-sync-actions { display: grid; gap: 7px; }
+.ple-sync-start-btn {
+  width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 11px; border: 2px solid var(--lime); background: var(--lime); color: var(--ink);
+  cursor: pointer; font-family: var(--font-mono); font-weight: 700;
+  font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; box-shadow: 3px 3px 0 #000;
+  transition: filter 0.1s;
+}
+.ple-sync-start-btn:hover:not(:disabled) { filter: brightness(1.06); }
+.ple-sync-start-btn:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
+.ple-sync-save-btn,
+.ple-sync-cancel-btn {
+  width: 100%; padding: 10px; border: 2px solid var(--line); background: transparent; color: var(--ghost-2);
+  font-family: var(--font-mono); font-weight: 700; font-size: 11px;
+  letter-spacing: 0.1em; text-transform: uppercase; cursor: not-allowed; transition: all 0.1s;
+}
+.ple-sync-save-btn:not(:disabled) { border-color: var(--lime); color: var(--lime); cursor: pointer; }
+.ple-sync-cancel-btn:not(:disabled) { border-color: var(--line); color: var(--paper-dim); cursor: pointer; }
+.ple-sync-cancel-btn:not(:disabled):hover { border-color: var(--red); color: var(--red); }
+
+/* bloque INICIO DEL JUEGO (panel 02): label rosa + botón ▶ ARRANCAR EN EL CABEZAL */
+.ple-start-block {
+  border: 2px solid var(--line); background: var(--surface);
+  padding: 14px 16px; margin-bottom: 8px;
+}
+.ple-start-readout { display: flex; align-items: baseline; gap: 7px; margin-bottom: 12px; }
+.ple-start-val {
+  font-family: var(--font-display); font-size: 24px; letter-spacing: -0.01em; color: var(--ghost-2);
+}
+.ple-start-btn {
+  width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 11px; border: 2px solid var(--magenta); background: var(--magenta); color: var(--ink);
+  cursor: pointer; font-family: var(--font-mono); font-weight: 700;
+  font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; box-shadow: 3px 3px 0 #000;
+  transition: filter 0.1s;
+}
+.ple-start-btn:hover { filter: brightness(1.06); }
+
+.ple-offset-stepper { display: flex; align-items: stretch; border: 2px solid var(--line); }
+.ple-off-btn {
+  width: 40px; flex: none; border: 0; background: var(--surface); color: var(--paper-dim);
+  cursor: pointer; font-family: var(--font-mono); font-weight: 700; font-size: 11px;
+  transition: background 0.1s, color 0.1s;
+}
+.ple-off-btn:hover { background: #1c1c22; color: var(--paper); }
+.ple-off-btn[data-off="-5"], .ple-off-btn[data-off="-1"] { border-right: 2px solid var(--line); }
+.ple-off-btn[data-off="1"], .ple-off-btn[data-off="5"] { border-left: 2px solid var(--line); }
+.ple-off-val {
+  flex: 1; display: flex; align-items: center; justify-content: center; background: var(--ink);
+  font-family: var(--font-display); font-size: 18px; color: var(--cyan);
+}
+
+/* panel 03 Descansos */
+.ple-breaks-count {
+  font-size: 10px; letter-spacing: 0.12em; color: var(--ghost);
+  border: 2px solid var(--line); padding: 3px 8px;
+}
+.ple-mark-btn {
+  width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 12px; border: 2px solid var(--yellow); background: var(--yellow); color: var(--ink);
+  cursor: pointer; font-family: var(--font-mono); font-weight: 700;
+  font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; box-shadow: 3px 3px 0 #000;
+  transition: filter 0.1s;
+}
+.ple-mark-btn:hover { filter: brightness(1.06); }
+.ple-mark-btn.marking {
+  border-color: var(--red); background: transparent; color: var(--red); box-shadow: none;
+}
+.ple-mark-instr {
+  font-size: 10px; letter-spacing: 0.06em; color: var(--ghost-2);
+  margin: 10px 0 14px; line-height: 1.6;
+}
+.ple-mark-instr.marking { color: var(--yellow); }
+.ple-breaks-list {
+  flex: 1; min-height: 60px; max-height: 180px; overflow-y: auto;
+  border: 2px solid var(--line); background: var(--surface);
+}
+.ple-breaks-empty {
+  padding: 24px 16px; text-align: center; font-size: 11px;
+  letter-spacing: 0.1em; color: var(--ghost-2); text-transform: uppercase;
+}
+.ple-break-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 11px 13px; border-bottom: 2px solid #1c1c22;
+}
+.ple-break-bar { width: 7px; height: 18px; flex: none; background: var(--yellow); }
+.ple-break-text { flex: 1; min-width: 0; }
+.ple-break-range {
+  font-family: var(--font-mono); font-weight: 700; font-size: 13px; color: var(--paper);
+}
+.ple-break-dur { font-size: 10px; letter-spacing: 0.08em; color: var(--ghost); }
+.ple-break-del {
+  width: 24px; height: 24px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  border: 2px solid var(--line); color: var(--ghost); cursor: pointer; font-size: 11px;
+  transition: border-color 0.1s, color 0.1s;
+}
+.ple-break-del:hover { border-color: var(--red); color: var(--red); }
+
+/* ---------- monitor + actions (footbar) ---------- */
+.ple-footbar { flex: none; display: flex; align-items: stretch; background: var(--ink); }
+.ple-monitor {
+  flex: 1; min-width: 0; display: flex; align-items: center;
+  overflow-x: auto; border-right: 2px solid var(--line);
+}
+.ple-mon-cell { padding: 13px 18px; border-right: 2px solid #1c1c22; white-space: nowrap; }
+.ple-mon-cell:last-child { border-right: 0; }
+.ple-mon-label {
+  font-size: 9px; letter-spacing: 0.14em; color: var(--ghost); display: block; margin-bottom: 4px;
+}
+.ple-mon-val { font-family: var(--font-mono); font-weight: 700; font-size: 13px; color: var(--paper); }
+.ple-mon-val.yellow { color: var(--yellow); }
+#ple-mon-song { color: var(--ed-accent); }
+#ple-mon-state { color: var(--lime); }
+.ple-actions { flex: none; display: flex; align-items: stretch; }
+.ple-act-probar,
+.ple-act-export,
+.ple-act-save {
+  display: flex; align-items: center; gap: 9px; border: 0; cursor: pointer;
+  transition: filter 0.1s, background 0.1s, color 0.1s;
+}
+.ple-act-probar {
+  padding: 0 24px; border-right: 2px solid var(--line); background: transparent; color: var(--paper);
+  font-family: var(--font-display); font-size: 15px; letter-spacing: 0.02em;
+}
+.ple-act-probar:hover { background: var(--surface); }
+.ple-act-export {
+  padding: 0 24px; border-right: 2px solid var(--line); background: transparent; color: var(--paper-dim);
+  font-family: var(--font-mono); font-weight: 700; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase;
+}
+.ple-act-export:hover { background: var(--surface); color: var(--paper); }
+.ple-act-save {
+  padding: 0 30px; background: var(--lime); color: var(--ink);
+  font-family: var(--font-display); font-size: 15px; letter-spacing: 0.02em;
+}
+.ple-act-save:hover { filter: brightness(1.06); }
+
+/* ---------- toast ---------- */
+.ple-toast {
+  --toast-color: var(--lime);
+  position: fixed; bottom: 34px; left: 50%; transform: translateX(-50%); z-index: 60;
+  background: var(--toast-color); color: var(--ink);
+  font-family: var(--font-display); font-size: 14px; letter-spacing: 0.02em;
+  padding: 12px 22px; box-shadow: 5px 5px 0 #000; text-transform: uppercase;
+  pointer-events: none; animation: pl-ed-toast 2s ease forwards;
+}
+.ple-toast[hidden] { display: none; }
+@keyframes pl-ed-toast {
+  0% { transform: translate(-50%, 18px); opacity: 0; }
+  12% { transform: translate(-50%, 0); opacity: 1; }
+  86% { opacity: 1; }
+  100% { transform: translate(-50%, -10px); opacity: 0; }
+}

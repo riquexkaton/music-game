@@ -103,12 +103,25 @@ export interface GameApi {
   /** Muestra un judgment con stamp + dispara FX. `null` = volver a 'PREPARADO'. */
   showJudgment(judg: "PERFECT" | "GOOD" | "MISS" | null): void;
   /**
+   * Avisa a la capa stream/hype del veredicto REAL del motor con el combo REAL.
+   * Es el ÚNICO punto que alimenta hype/multiplicador/chat/alertas con datos
+   * honestos. En MISS, `combo` debe ser el combo que SE ROMPE (capturado ANTES de
+   * resetearlo a 0), para que la intensidad de la reacción sea proporcional.
+   */
+  react(verdict: "PERFECT" | "GOOD" | "MISS", combo: number): void;
+  /**
    * Feedback de DESCANSO (descanso real del motor, src/core/rests.ts).
    * `active=true` muestra el bloque con `secondsLeft` (s restantes) y `fraction`
    * (0..1 restante, para la barra) y activa el overlay rayado de la timing bar.
    * `active=false` vuelve al estado normal.
    */
   setBreak(active: boolean, secondsLeft?: number, fraction?: number): void;
+  /**
+   * Cuenta regresiva del intro (overlay central). `label` = "3"|"2"|"1"|"¡VAMOS!"
+   * muestra el número gigante con animación de impacto en cada cambio; `null` oculta
+   * el overlay. main.ts lo cablea por TIEMPO en los ~3s previos al INICIO DEL JUEGO.
+   */
+  setCountdown(label: string | null): void;
   /** Timecode decorativo (opcional, desde conductor.time). */
   setTimecode(text: string): void;
   /** Expresión del personaje (idle/hit/miss). */
@@ -158,6 +171,13 @@ export function createGame(root: HTMLElement, hooks: GameHooks): GameApi {
       <div class="pl-speed" id="plg-speed"></div>
       <div class="pl-emote-layer" id="plg-emote-layer"></div>
       <div class="pl-alert-layer" id="plg-alert-layer"></div>
+
+      <!-- CUENTA REGRESIVA del intro (3·2·1·¡VAMOS!) — overlay central, lo cablea
+           main.ts por TIEMPO en los ~3s previos al INICIO DEL JUEGO. Sólo vive en el
+           intro: ni bien arrancan las flechas (o hay descanso) se oculta (label=null). -->
+      <div class="pl-countdown" id="plg-countdown" hidden>
+        <div class="pl-countdown-num" id="plg-countdown-num"></div>
+      </div>
 
       <div class="pl-gamecol">
         <canvas class="pl-wave-canvas" id="plg-wave"></canvas>
@@ -297,6 +317,8 @@ export function createGame(root: HTMLElement, hooks: GameHooks): GameApi {
   const breakEl = $("plg-break");
   const breakSecEl = $("plg-break-sec");
   const breakFillEl = $("plg-break-fill");
+  const countdownEl = $("plg-countdown");
+  const countdownNumEl = $("plg-countdown-num");
   const arrowsEl = $("plg-arrows");
   const timingEl = $("plg-timing");
   const timingGood = $("plg-timing-good");
@@ -392,11 +414,20 @@ export function createGame(root: HTMLElement, hooks: GameHooks): GameApi {
       prevStates = [];
       return;
     }
+    // Secuencia FRESCA = veníamos sin barra activa (prevStates vacío). Solo en ese
+    // caso animamos la ENTRADA escalonada de las teclas; dentro de la misma barra
+    // (re-render por pulsación) NO, para no re-animar feo en cada tecla.
+    const fresh = prevStates.length === 0;
     states.forEach((state, i) => {
       const cell = document.createElement("div");
       cell.className = `pl-keycap pl-keycap-${state}`;
       // recién pulsada: pasó a 'done' en este render → punch.
       if (state === "done" && prevStates[i] !== "done") cell.classList.add("pl-keycap-punch");
+      // entrada escalonada de la secuencia fresca (stagger por índice).
+      if (fresh) {
+        cell.classList.add("pl-keycap-enter");
+        cell.style.animationDelay = `${i * 60}ms`;
+      }
       cell.textContent = glyphs[i] ?? ARROW_GLYPHS[i] ?? "?";
       arrowsEl.appendChild(cell);
     });
@@ -446,10 +477,13 @@ export function createGame(root: HTMLElement, hooks: GameHooks): GameApi {
     // re-trigger de la animación pl-stamp
     void stamp.offsetWidth;
 
-    // FX reactivos
+    // FX reactivos. El DESTELLO honesto: solo en aciertos/racha. En MISS NO
+    // destella (ya tiene su feedback: stamp FALLASTE, hype baja, chat negativo,
+    // expresión miss, flecha roja). Sin shake: el usuario quiere todo FIJO.
     fx.burst(judg, accent);
-    fx.flash(judg, accent);
-    if (judg === "MISS") fx.shake();
+    if (judg !== "MISS") fx.flash(judg, accent);
+    // La capa stream/hype NO se alimenta acá: main.ts llama a react(verdict, combo)
+    // explícitamente (con el combo que SE ROMPE en MISS, capturado antes del reset).
   }
 
   // ---------------- DESCANSO ----------------
@@ -490,6 +524,33 @@ export function createGame(root: HTMLElement, hooks: GameHooks): GameApi {
       timingEl.classList.remove("breaking");
       phaseEl.classList.remove("breaking");
     }
+  }
+
+  // ---------------- CUENTA REGRESIVA (intro) ----------------
+  // Overlay central grande "3 · 2 · 1 · ¡VAMOS!" en los segundos previos al INICIO
+  // DEL JUEGO (lo dispara main.ts por TIEMPO). Vive SÓLO en el intro: el centro está
+  // libre (sin descanso ni judgment), y se oculta ni bien arrancan las flechas.
+  //
+  // Guardamos el último label pintado para NO re-disparar la animación pl-count-pop
+  // en cada frame: main.ts llama esto cada rAF, pero sólo re-animamos en el CAMBIO de
+  // número. `label=null` oculta el overlay (fin del intro / fuera de la ventana).
+  let countLabel: string | null = null;
+  function setCountdown(label: string | null): void {
+    if (label === countLabel) return; // mismo estado: no tocar el DOM (anti-spam)
+    countLabel = label;
+    if (label === null) {
+      countdownEl.hidden = true;
+      countdownNumEl.textContent = "";
+      return;
+    }
+    const go = label === "¡VAMOS!"; // el golpe final tiñe en lima y pega más fuerte
+    countdownEl.hidden = false;
+    countdownNumEl.textContent = label;
+    countdownNumEl.classList.toggle("go", go);
+    // re-trigger del impacto (pop por número, go más intenso) reiniciando la animación.
+    countdownNumEl.style.animation = "none";
+    void countdownNumEl.offsetWidth;
+    countdownNumEl.style.animation = "";
   }
 
   /** Timecode decorativo de la esquina (lo cablea main.ts desde conductor.time). */
@@ -552,6 +613,8 @@ export function createGame(root: HTMLElement, hooks: GameHooks): GameApi {
   }
   function setCombo(combo: number): void {
     comboEl.innerHTML = `${combo}<span class="pl-hud-x">x</span>`;
+    // HUD puro: pinta el número. La reacción honesta de la capa stream/hype va por
+    // react(verdict, combo), que main.ts llama aparte con el combo correcto.
   }
   function setBest(best: number): void {
     bestEl.innerHTML = `${best}<span class="pl-hud-x">x</span>`;
@@ -587,6 +650,7 @@ export function createGame(root: HTMLElement, hooks: GameHooks): GameApi {
     applyTimingGeometry(info.bpm);
     applyBeatTiming(info.bpm);
     setBreak(false);
+    setCountdown(null);
     // Reset duro del score (sin rolling): nueva canción arranca en 0 limpio.
     displayScore = 0;
     scoreEl.style.animation = "none";
@@ -614,7 +678,12 @@ export function createGame(root: HTMLElement, hooks: GameHooks): GameApi {
     renderSequence,
     renderTiming,
     showJudgment,
+    // Reenvío honesto a la capa stream/hype. Misma union de veredicto que stream.react
+    // ("PERFECT"|"GOOD"|"MISS") → calza directo, sin mapear. main.ts pasa el combo REAL
+    // (en MISS, el que se rompe ANTES del reset).
+    react: (verdict, combo) => stream.react(verdict, combo),
     setBreak,
+    setCountdown,
     setTimecode,
     setExpression,
     setScore,

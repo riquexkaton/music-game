@@ -18,15 +18,24 @@ import { createSfx } from "./core/sfx";
 import {
   listSongs,
   uploadSong,
+  deleteSong,
   getAudioUrl,
   saveConfig,
   loadConfig,
+  slugify,
   type SongConfig,
 } from "./storage";
 import { guess } from "web-audio-beat-detector";
 import { initMenu } from "./ui/menu";
 import { createGame, type ArrowCellState, type GameApi } from "./ui/game";
 import { createResult } from "./ui/result";
+import {
+  createEditor,
+  type EditorApi,
+  type TrackInfo,
+  type EditorStatus,
+} from "./ui/editor";
+import { EditorWave, computePeaks, columnsForWidth } from "./ui/editor-wave";
 
 const BEATS_PER_BAR = 4;
 const COMMIT_WINDOW_BEATS = 1.5;
@@ -59,6 +68,18 @@ let nextBarCommit = 0;
 let pendingSpawn = false;
 let waitMessage = "";
 let currentRests: Rest[] = [];
+// INICIO DEL JUEGO efectivo de la canción en juego (segundos). 0 = arranca como
+// siempre (sin intro): canciones sin gameStartSet (builtins/viejas) caen acá → compat.
+let currentGameStart = 0;
+// Tiempo de audio (segundos) en que ARRANCAN las flechas = el tiempo del primer
+// commit (firstCommitBeat → segundos). Lo capturamos al programar la primera barra
+// en play() y NO cambia durante la partida. La cuenta regresiva del intro (game.ts)
+// se dispara contra esto en el loop. <0 hasta que se arranca una partida.
+let gameStartTime = -1;
+// Último estado de cuenta regresiva ENVIADO a la vista (para no recalcular labels en
+// cada frame). El anti-spam real vive en game.setCountdown; esto es la fuente del
+// timer de "¡VAMOS!" (lo apagamos ~0.6s después de cruzar el inicio).
+let countdownGoUntil = 0;
 
 // --- editor / timeline ---
 let editingRests: Rest[] = [];
@@ -66,6 +87,28 @@ let totalBeats = 0; // largo de la canción en beats (para mapear la barra)
 let pendingStartBeat: number | null = null; // primer clic de un descanso a medio marcar
 let syncCollector: AnchorCollector | null = null;
 let syncIntent = false; // venimos del "🔒 SINCRONIZAR" del SONG SELECT: orientar al sync
+
+// --- editor NUEVO (#screen-editor, editor.ts) — estado de Fase 2 ---
+// El editor reusa el MISMO conductor para reproducir audio, pero NO el scheduler
+// (sin metrónomo) ni el runner del juego: es sólo audición. Como el Conductor no
+// expone seek arbitrario (arranca desde pausedAt), el "cabezal" del editor es:
+//   - durante PLAY: sigue conductor.time en vivo (audio real, fuente de verdad).
+//   - en PAUSA: un scrub VISUAL (edWaveTime) que se mueve al clic en la onda y
+//     alimenta monitor/beat/reloj, SIN saltar el audio (eso requeriría tocar core/).
+let editorWave: EditorWave | null = null;
+let edPlaying = false; // transport del editor activo (audio sonando para audición)
+let edSyncing = false; // sync-por-anclas en curso en el editor (ESPACIO = palmeo)
+let edSyncCollector: AnchorCollector | null = null;
+let edWaveTime = 0; // posición del cabezal del editor en segundos (scrub visual en pausa)
+let edMarking = false; // modo "marcar descanso" (clic-clic sobre la onda)
+let edPendingStartBeat: number | null = null; // inicio del descanso a medio marcar (en beats)
+let edTapTimes: number[] = []; // timestamps (ms, performance.now) del tap-tempo
+let edTapBpm: number | null = null; // BPM derivado del tap-tempo (o null)
+let edTapResetTimer = 0;
+let edLooping = false; // rAF del editor (monitor/cabezal en vivo) activo
+let returnToEditorAfterPlay = false; // Probar: al salir/terminar el juego, volver a #screen-editor
+// Duración real "m:ss" por canción, medida al decodificar el audio (la lista la usa).
+const songDurations = new Map<string, string>();
 
 let score = 0;
 let combo = 0;
@@ -88,6 +131,13 @@ let songEnded = false;
 let game: GameApi | null = null;
 let currentAccent = "#c8ff1e";
 
+// Vista nueva del EDITOR (#screen-editor, editor.ts). Se instancia al final (necesita
+// `menu`). El editor VIEJO (#controls-editor) sigue existiendo hasta que Fase 2 lo
+// limpie; esta vista nueva es la que se muestra al entrar a #editor.
+let editor: EditorApi | null = null;
+const ACCENTS = ["#c8ff1e", "#25e0ff", "#ff2e9a", "#ffd021", "#a78bfa", "#ff7847"];
+const accentForIndex = (i: number): string => ACCENTS[i % ACCENTS.length]!;
+
 let loadedSongId: string | null = null;
 let currentBuffer: AudioBuffer | null = null;
 let currentEnergy: EnergyMap | null = null; // mapa de energía de la canción cargada
@@ -106,6 +156,7 @@ function saveInputOffset(value: number): void {
 const $ = (id: string): HTMLElement => document.getElementById(id)!;
 const gameControls = $("controls-game");
 const editorControls = $("controls-editor");
+const editorScreen = $("screen-editor"); // pantalla nueva del editor (editor.ts)
 const navGameBtn = $("nav-game") as HTMLButtonElement;
 const navEditorBtn = $("nav-editor") as HTMLButtonElement;
 
@@ -179,22 +230,180 @@ async function initLibrary(): Promise<void> {
   if (!currentSong) currentSong = songs[0] ?? null;
   renderSongPicker();
   showSongInfo();
-  if (location.hash === "#editor") void openEditor();
+  if (location.hash === "#editor") {
+    void openEditor();
+    refreshEditorView(); // poblar la lista/header del editor nuevo una vez cargada la librería
+  }
 }
 
 // ---------------- routing ----------------
+// #editor → muestra la pantalla NUEVA del editor (#screen-editor, editor.ts). El
+// panel viejo (#controls-editor en #screen-game) ya no se enruta acá; sigue en el
+// DOM hasta que Fase 2 lo elimine. Mantenemos los toggles viejos por las dudas.
 function route(): void {
-  const editor = location.hash === "#editor";
-  editorControls.classList.toggle("hidden", !editor);
-  gameControls.classList.toggle("hidden", editor);
-  navGameBtn.classList.toggle("selected", !editor);
-  navEditorBtn.classList.toggle("selected", editor);
+  const isEditor = location.hash === "#editor";
+  editorControls.classList.toggle("hidden", !isEditor);
+  gameControls.classList.toggle("hidden", isEditor);
+  navGameBtn.classList.toggle("selected", !isEditor);
+  navEditorBtn.classList.toggle("selected", isEditor);
   if (mode !== "idle") stopPlayback();
-  if (editor) {
-    runnerView = "panel"; // el editor "Probar" pinta en el panel viejo, no en #screen-play
-    menu.showGame();
-    void openEditor();
+  if (isEditor) {
+    runnerView = "panel"; // el "Probar" del editor manda a #screen-play (editorProbar)
+    showEditorScreen();
+  } else if (!editorScreen.classList.contains("hidden")) {
+    // Salimos del editor (estaba visible) → cortar audición y volver al START.
+    editorStopPlayback();
+    editorScreen.classList.add("hidden");
+    menu.showStart();
   }
+}
+
+// ---------------- pantalla nueva del editor (#screen-editor) ----------------
+/** Muestra #screen-editor: oculta TODAS las otras pantallas y refresca la vista. */
+function showEditorScreen(): void {
+  // Ocultamos las pantallas del menú (start/select/play/result/game) y mostramos
+  // la del editor. menu.showGame() apaga las 5 que conoce; luego tapamos #screen-game.
+  menu.showGame();
+  $("screen-game").classList.add("hidden");
+  editorScreen.classList.remove("hidden");
+  refreshEditorView();
+}
+
+/** Re-renderiza la lista + el header + (Fase 2) prepara onda/transport/descansos. */
+function refreshEditorView(): void {
+  if (!editor) return;
+  editor.renderTrackList(buildTrackList(), currentSong?.id ?? null);
+  renderEditorSong();
+  // Fase 2: sincronizar el estado en edición de descansos + dibujar la onda real.
+  editingRests = sortRests((loadConfig(currentSong?.id ?? "")?.rests ?? currentSong?.rests ?? []).map((r) => ({ ...r })));
+  edPendingStartBeat = null;
+  edMarking = false;
+  edWaveTime = 0;
+  editor.setMarkMode(false, false);
+  editorRenderBreaks();
+  editor.setTapReadout("tocá 4+ veces", false);
+  editorRenderSyncReadout();
+  if (currentSong) editor.setOffset(formatMs(chart.offset));
+  void editorPrepareSong();
+}
+
+/** Carga el audio de la canción actual (si hace falta), pinta la onda y el transport. */
+async function editorPrepareSong(): Promise<void> {
+  if (!editor) return;
+  if (!currentSong) {
+    editorWave?.clear();
+    return;
+  }
+  // Setear chart al tempo guardado de la canción (para grilla/beat correctos).
+  const saved = loadConfig(currentSong.id) ?? currentSong;
+  const t = songTempo(saved);
+  chart.bpm = t?.bpm ?? 120;
+  chart.offset = t?.offset ?? 0;
+  editor.setOffset(formatMs(chart.offset));
+  try {
+    await editorEnsureLoaded();
+  } catch {
+    editorWave?.clear();
+    editor.toast("NO PUDE CARGAR EL AUDIO", "#ff3b30");
+    return;
+  }
+  // Duración real → header + lista + clock total.
+  editorApplyDuration();
+  editorRenderBreaks();
+  editorDrawWave();
+  editorRefreshTransport();
+}
+
+/** Vuelca la duración real del buffer al header (len) re-renderizando lista + header. */
+function editorApplyDuration(): void {
+  if (!editor || !currentBuffer) return;
+  // songDurations ya tiene la duración (la cacheó editorEnsureLoaded). Re-renderizamos
+  // lista + header para que la fila y el "/ m:ss" del transport tomen el valor real
+  // (setSong ya escribe lenTotalEl desde info.len).
+  editor.renderTrackList(buildTrackList(), currentSong?.id ?? null);
+  renderEditorSong();
+}
+
+/** Construye las filas de la lista de pistas desde `songs` (con su accent por índice). */
+function buildTrackList(): TrackInfo[] {
+  return songs.map((s, i) => {
+    const synced = s.tempoSource === "manual";
+    const accent = synced ? accentForIndex(i) : "#8a8590";
+    const t = songTempo(s);
+    return {
+      id: s.id,
+      num: String(i + 1).padStart(2, "0"),
+      title: s.title,
+      bpm: t ? String(Math.round(t.bpm)) : "—",
+      diff: DIFFICULTIES[s.difficulty].label.toUpperCase(),
+      len: songDurations.get(s.id) ?? "—", // duración real una vez decodificado el audio
+      accent,
+      synced,
+      breaks: (loadConfig(s.id)?.rests ?? s.rests ?? []).length,
+      removable: s.source === "uploaded",
+    };
+  });
+}
+
+/** Setea el song header + status + monitor + dificultad para la canción actual. */
+function renderEditorSong(): void {
+  if (!editor) return;
+  const song = currentSong;
+  if (!song) {
+    editor.setSong(null);
+    editor.setStatus({ label: "— SIN PISTA —", color: "#71717a" });
+    editor.renderBreaks([]);
+    return;
+  }
+  const i = songs.findIndex((s) => s.id === song.id);
+  const synced = song.tempoSource === "manual";
+  const accent = synced ? accentForIndex(Math.max(0, i)) : "#8a8590";
+  currentAccent = accent;
+  const t = songTempo(song);
+  editor.setSong({
+    title: song.title,
+    artist: song.source === "uploaded" ? "SUBIDA" : "BUILTIN",
+    len: songDurations.get(song.id) ?? "—",
+    bpm: t ? String(Math.round(t.bpm)) : "—",
+    source: song.tempoSource === "none" ? "—" : song.tempoSource,
+    accent,
+    difficulty: song.difficulty,
+  });
+  editor.setStatus(editorStatusFor(song));
+  editor.setOffset(formatMs(song.offset));
+  const gs = editorGameStart();
+  editor.setGameStart(
+    gs.gameStartSet ? `${formatClock(gs.gameStart)} s` : "sin definir",
+    gs.gameStartSet ? "#ff2e9a" : "#52525b",
+  );
+  editor.setMonitor({ beat: "0.00", state: "—", stateColor: accent });
+  // descansos guardados → lista del panel 03
+  const rests = sortRests(loadConfig(song.id)?.rests ?? song.rests ?? []);
+  const spb = 60 / (t?.bpm || 120);
+  editor.renderBreaks(
+    rests.map((r, k) => {
+      const startSec = (t?.offset ?? 0) + r.atBeat * spb;
+      const endSec = startSec + r.durationBeats * spb;
+      return {
+        id: String(k),
+        range: `${formatTime(startSec)} → ${formatTime(endSec)}`,
+        dur: `${r.durationBeats} ${r.durationBeats === 1 ? "compás" : "compases"}`,
+      };
+    }),
+  );
+}
+
+/**
+ * Status pill del header (3 estados, según el diseño):
+ *   sin sync manual        → ◆ FALTA SYNC   (falta el primer beat)
+ *   sync ok, sin gameStart → ◆ FALTA INICIO (falta el INICIO DEL JUEGO)
+ *   ambos                  → ✓ LISTA
+ */
+function editorStatusFor(song: SongConfig): EditorStatus {
+  if (song.tempoSource !== "manual") return { label: "◆ FALTA SYNC", color: "#ffd021" };
+  const cfg = loadConfig(song.id) ?? song;
+  if (!cfg.gameStartSet) return { label: "◆ FALTA INICIO", color: "#ffd021" };
+  return { label: "✓ LISTA", color: currentAccent };
 }
 
 navGameBtn.addEventListener("click", () => {
@@ -219,12 +428,16 @@ function renderSongPicker(): void {
 
 function selectSong(song: SongConfig): void {
   if (mode !== "idle") stopPlayback();
+  editorStopPlayback(); // cortar audición del editor si cambiamos de pista
   currentSong = song;
   loadedSongId = null;
   pendingStartBeat = null;
   renderSongPicker();
   showSongInfo();
-  if (location.hash === "#editor") void openEditor();
+  if (location.hash === "#editor") {
+    void openEditor(); // editor viejo (sigue vivo hasta Fase 2)
+    refreshEditorView(); // editor nuevo (#screen-editor)
+  }
 }
 
 function songTempo(song: SongConfig): { bpm: number; offset: number } | null {
@@ -248,6 +461,9 @@ function stopPlayback(): void {
   activeBar = null;
   tracker = null;
   pendingSpawn = false;
+  // Cerrar la ventana del countdown del intro: sin partida activa no debe dispararse.
+  gameStartTime = -1;
+  countdownGoUntil = 0;
   syncCollector = null;
   syncPanel.classList.add("hidden");
   renderSequence();
@@ -289,7 +505,11 @@ async function play(view: RunnerView = "play"): Promise<void> {
   chart.title = song.title;
   chart.bpm = tempo.bpm;
   chart.offset = tempo.offset;
-  currentRests = sortRests(loadConfig(song.id)?.rests ?? song.rests ?? []);
+  const savedCfg = loadConfig(song.id) ?? song;
+  currentRests = sortRests(savedCfg.rests ?? []);
+  // INICIO DEL JUEGO: sólo si el usuario lo fijó (gameStartSet). Si no → 0 (compat:
+  // arranca como hoy, lead-in normal desde el comienzo). NUNCA rompe canciones viejas.
+  currentGameStart = savedCfg.gameStartSet ? savedCfg.gameStart : 0;
   bpmEl.textContent = `${song.title} · ${Math.round(tempo.bpm)} BPM`;
   songOffsetEl.textContent = formatMs(tempo.offset);
 
@@ -329,8 +549,37 @@ async function play(view: RunnerView = "play"): Promise<void> {
   startBtn.textContent = "♪ sonando";
   statusEl.textContent = "¡Preparate! Sentí el ritmo unos compases y arrancá.";
   pendingSpawn = false;
-  scheduleBar(skipRests(gridBeat(conductor.beat + LEAD_IN_BEATS)), "¡Preparate!");
+  const firstCommit = firstCommitBeat();
+  scheduleBar(firstCommit, "¡Preparate!");
+  // INICIO DEL JUEGO en segundos = tiempo del primer commit (beat → s, igual que el
+  // resto del código: beat*spb + offset). Contra esto se dispara la cuenta regresiva
+  // del intro en el loop. Vale tanto para partida normal como para "Probar"; si la
+  // canción no tiene gameStart explícito, igual hay lead-in → el countdown cae en los
+  // 3s previos a que arranquen las flechas. countdownGoUntil=0 = nada mostrándose aún.
+  gameStartTime = runnerView === "play" ? beatToTime(firstCommit) : -1;
+  countdownGoUntil = 0;
   ensureLoop();
+}
+
+/** Beat (en grilla del chart) → tiempo de audio en segundos: beat*spb + offset. */
+function beatToTime(beat: number): number {
+  const spb = chart.bpm > 0 ? 60 / chart.bpm : 0.5;
+  return beat * spb + chart.offset;
+}
+
+/**
+ * El beat donde se programa la PRIMERA secuencia. Es el más tardío entre:
+ *  - el lead-in normal ("¡Preparate!" unos compases desde el comienzo), y
+ *  - el INICIO DEL JUEGO (las flechas no pueden arrancar antes de gameStart).
+ * Ambos se snappean a downbeat (gridBeat) y se saltan descansos (skipRests).
+ * Si gameStart es 0 (canciones sin fijar) el término de gameStart es ≤ 0 y manda
+ * el lead-in → comportamiento idéntico al de hoy (compat hacia atrás).
+ */
+function firstCommitBeat(): number {
+  const leadInBeat = gridBeat(conductor.beat + LEAD_IN_BEATS);
+  const spb = chart.bpm > 0 ? 60 / chart.bpm : 0.5;
+  const gameStartBeat = gridBeat((currentGameStart - chart.offset) / spb);
+  return skipRests(Math.max(leadInBeat, gameStartBeat));
 }
 
 async function ensureSongReady(song: SongConfig): Promise<{ bpm: number; offset: number }> {
@@ -341,6 +590,7 @@ async function ensureSongReady(song: SongConfig): Promise<{ bpm: number; offset:
     currentBuffer = await conductor.load(url);
     currentEnergy = analyzeEnergy(currentBuffer.getChannelData(0), currentBuffer.sampleRate);
     loadedSongId = song.id;
+    songDurations.set(song.id, formatTime(currentBuffer.duration));
   }
   const saved = loadConfig(song.id) ?? song;
   const tempo = songTempo(saved);
@@ -630,14 +880,30 @@ saveRestsBtn.addEventListener("click", () => {
   editorHintEl.textContent = `✓ Guardados ${editingRests.length} descanso(s). Dale Probar para escucharlos.`;
 });
 
+/**
+ * Salir del juego real (#screen-play). Si venimos del "Probar" del editor, volvemos
+ * a #screen-editor (decisión del usuario); si no, al SONG SELECT como siempre.
+ */
+function leavePlay(): void {
+  if (mode !== "idle") stopPlayback();
+  if (game) {
+    game.setCountdown(null); // por si salimos durante el intro (con el countdown vivo)
+    game.stop();
+  }
+  if (returnToEditorAfterPlay) {
+    returnToEditorAfterPlay = false;
+    showEditorScreen();
+  } else {
+    menu.showSelect();
+  }
+}
+
 // ---------------- INPUT ----------------
 window.addEventListener("keydown", (e) => {
-  // ESC durante el juego real (#screen-play) = el botón "ESC · SALIR": volver a SELECT.
+  // ESC durante el juego real (#screen-play) = "ESC · SALIR": volver (editor o SELECT).
   if (e.code === "Escape" && mode === "playing" && runnerView === "play") {
     e.preventDefault();
-    stopPlayback();
-    if (game) game.stop();
-    menu.showSelect();
+    leavePlay();
     return;
   }
   if (e.code === "Space") {
@@ -645,6 +911,11 @@ window.addEventListener("keydown", (e) => {
     if (mode === "calibrating") onCalibrationTap();
     else if (mode === "syncing") onSyncTap();
     else if (mode === "playing") onCommit();
+    // Editor nuevo (#screen-editor): ESPACIO = palmeo del sync, o play/pausa.
+    else if (!editorScreen.classList.contains("hidden")) {
+      if (edSyncing) editorSyncTap();
+      else void editorPlayPause();
+    }
     return;
   }
   const arrow = arrowFromCode(e.code);
@@ -745,6 +1016,9 @@ function onCommit(): void {
 }
 
 function applyResult({ grade, delta, sequenceOk }: BarResult): void {
+  // Combo que SE ROMPE en un MISS: lo capturamos ANTES de resetearlo a 0 para que
+  // la capa stream/hype reaccione proporcional a la racha perdida (react más abajo).
+  const brokenCombo = combo;
   // SFX según el juicio (cool cuenta como perfect, igual que el conteo de abajo).
   if (grade === "miss") sfx.miss();
   else if (grade === "good") sfx.good();
@@ -776,6 +1050,9 @@ function applyResult({ grade, delta, sequenceOk }: BarResult): void {
     game.setScore(score);
     game.setCombo(combo);
     game.setBest(bestCombo);
+    // Capa stream/hype HONESTA: en aciertos, el combo nuevo; en MISS, el combo que
+    // SE ROMPE (brokenCombo, antes del reset) para que la caída pegue proporcional.
+    game.react(judg, judg === "MISS" ? brokenCombo : combo);
     setPlayExpression(grade === "miss" ? "miss" : "hit");
   }
 }
@@ -790,6 +1067,8 @@ function setPlayExpression(e: "hit" | "miss"): void {
 
 function resolveTimeout(): void {
   sfx.miss();
+  // Combo que SE ROMPE por timeout: capturado ANTES del reset (para react más abajo).
+  const brokenCombo = combo;
   combo = 0;
   misses += 1;
   const reason = tracker && !tracker.isReady ? "secuencia incompleta" : "no confirmaste";
@@ -799,6 +1078,8 @@ function resolveTimeout(): void {
   if (runnerView === "play" && game) {
     game.showJudgment("MISS");
     game.setCombo(0);
+    // react con el combo que se rompe (no 0): el desplome es proporcional a la racha.
+    game.react("MISS", brokenCombo);
     setPlayExpression("miss");
   }
 }
@@ -954,6 +1235,43 @@ function renderTimingPlay(): void {
   game.renderTiming(progress, tracker.isReady ? "confirm" : "load");
 }
 
+/**
+ * Cuenta regresiva del intro (sólo #screen-play): muestra "3·2·1·¡VAMOS!" en los ~3s
+ * previos al INICIO DEL JUEGO (gameStartTime = tiempo del primer commit). Se dispara
+ * por TIEMPO contra conductor.time:
+ *   remaining ∈ (2,3] → "3"   (1,2] → "2"   (0,1] → "1"
+ *   al cruzar 0 → "¡VAMOS!" por ~0.6s, después se oculta (null).
+ * Fuera de esa ventana → null. game.setCountdown ya hace anti-spam (sólo toca el DOM
+ * cuando cambia el número), así que llamar cada frame es barato.
+ *
+ * El countdown manda SÓLO en el intro inicial: si por algún borde hubiera descanso
+ * (renderTimingPlay ya lo pinta), igual acá devolvemos null ni bien arranca el juego
+ * (remaining ≤ 0 y venció el "¡VAMOS!"), así nunca pisa al bloque DESCANSO/judgment.
+ */
+function renderCountdown(): void {
+  if (!game) return;
+  // Sin ventana válida (no es juego real, o ya terminó): asegurar overlay oculto.
+  if (mode !== "playing" || gameStartTime < 0) {
+    if (countdownGoUntil !== 0) countdownGoUntil = 0;
+    game.setCountdown(null);
+    return;
+  }
+  const remaining = gameStartTime - conductor.time;
+  if (remaining > 3) {
+    // Todavía falta: nada (aún no entramos a los 3s). Mantener limpio.
+    game.setCountdown(null);
+    return;
+  }
+  if (remaining > 0) {
+    // (0,3] → 3 / 2 / 1 según el segundo en curso (ceil: 2.4→"3", 0.2→"1").
+    game.setCountdown(String(Math.ceil(remaining)));
+    return;
+  }
+  // remaining ≤ 0 → ya arrancaron las flechas. Mostrar "¡VAMOS!" un toque y apagar.
+  if (countdownGoUntil === 0) countdownGoUntil = conductor.time + 0.6;
+  game.setCountdown(conductor.time < countdownGoUntil ? "¡VAMOS!" : null);
+}
+
 let looping = false;
 function ensureLoop(): void {
   if (looping) return;
@@ -983,6 +1301,7 @@ function loop(): void {
         }
       }
       game.setTimecode(formatTimecode(conductor.time));
+      renderCountdown();
     }
   }
   renderTiming();
@@ -1027,7 +1346,10 @@ function finishSong(): void {
   const song = currentSong;
   stopPlayback();
   clearTimeout(exprTimer);
-  if (game) game.stop();
+  if (game) {
+    game.setCountdown(null);
+    game.stop();
+  }
   if (!song) {
     menu.showSelect();
     return;
@@ -1070,18 +1392,714 @@ game = createGame($("screen-play"), {
     return conductor.isMuted;
   },
   onExit: () => {
-    if (mode !== "idle") stopPlayback();
-    if (game) game.stop();
-    menu.showSelect();
+    leavePlay();
   },
   getFreq: () => conductor.getFrequencyData(),
   getBpm: () => chart.bpm,
 });
 
+// Vista nueva del EDITOR (#screen-editor): se instancia acá (ya existe `menu`).
+// FASE 1 cablea los hooks SIMPLES; los demás son TODO de Fase 2 (ver comentarios).
+editor = createEditor($("screen-editor"), {
+  // ✅ seleccionar pista
+  onSelectSong: (id) => {
+    const song = songs.find((s) => s.id === id);
+    if (song) selectSong(song);
+  },
+  // ✅ subir pista (uploadSong → IndexedDB + config)
+  onUpload: (file) => void uploadFromEditor(file),
+  // ✅ borrar pista subida (con confirm; las builtin no se borran)
+  onDeleteSong: (id) => void deleteFromEditor(id),
+  // ✅ dificultad (persistir en la config de la canción)
+  onSetDifficulty: (diff) => {
+    if (!currentSong) return;
+    persistSong(currentSong, { difficulty: diff });
+    renderEditorSong();
+    editor?.toast(`DIFICULTAD · ${DIFFICULTIES[diff].label.toUpperCase()}`, "#c8ff1e");
+  },
+
+  // ✅ FASE 2 — panel 01 Tempo: detección auto + BPM manual + tap-tempo.
+  onDetect: () => void editorDetect(),
+  onBpmStep: (delta) => editorBpmStep(delta),
+  onTap: () => editorTap(),
+  onApplyTap: () => editorApplyTap(),
+
+  // ✅ FASE 2 — panel 02 Sync (sync-por-anclas): reusa AnchorCollector + fitTempo.
+  onSyncStart: () => void editorSyncStart(),
+  onSyncTap: () => editorSyncTap(),
+  onSyncSave: () => editorSyncSave(),
+  onSyncCancel: () => editorSyncCancel(),
+  onFixStart: () => editorFixGameStart(),
+  onOffsetStep: (deltaMs) => editorOffsetStep(deltaMs),
+
+  // ✅ FASE 2 — panel 03 Descansos: marcado SOBRE la onda (clic-clic) + borrar.
+  onToggleMark: () => editorToggleMark(),
+  onDelRest: (id) => editorDelRest(id),
+
+  // ✅ FASE 2 — transport: play/pausa + reinicio + clic-en-onda (scrub o marcar).
+  onPlay: () => void editorPlayPause(),
+  onRestart: () => editorRestart(),
+  onWaveClick: (fraction) => editorWaveClick(fraction),
+
+  // ✅ FASE 2 — Probar (→ #screen-play) y Export JSON. GUARDAR persiste.
+  onProbar: () => void editorProbar(),
+  onExport: () => editorExport(),
+  onSave: () => {
+    if (!currentSong) {
+      editor?.toast("NO HAY PISTA", "#ff3b30");
+      return;
+    }
+    // GUARDAR exige primer beat (sync manual) Y el INICIO DEL JUEGO definidos.
+    if (currentSong.tempoSource !== "manual") {
+      editor?.toast("FALTA SINCRONIZAR (PANEL 02)", "#ff3b30");
+      return;
+    }
+    if (!editorGameStart().gameStartSet) {
+      editor?.toast("FALTA DEFINIR EL INICIO DEL JUEGO", "#ff3b30");
+      return;
+    }
+    // Persistimos la config actual (dificultad/offset/descansos ya editados en vivo).
+    persistSong(currentSong, { rests: sortRests(editingRests) });
+    editor?.toast("GUARDADO ✓", "#c8ff1e");
+  },
+});
+
+// ---------------- helpers del editor nuevo (upload / delete) ----------------
+async function uploadFromEditor(file: File): Promise<void> {
+  editor?.toast("SUBIENDO…", "#25e0ff");
+  const config = await uploadSong(file);
+  songs = await listSongs();
+  currentSong = songs.find((s) => s.id === config.id) ?? config;
+  loadedSongId = null;
+  refreshEditorView();
+  renderSongPicker(); // mantener el selector viejo en sync también
+  editor?.toast("PISTA SUBIDA — SINCRONIZALA", "#c8ff1e");
+}
+
+async function deleteFromEditor(id: string): Promise<void> {
+  const song = songs.find((s) => s.id === id);
+  if (!song || song.source !== "uploaded") return; // builtin no se borran
+  if (!window.confirm(`¿Borrar "${song.title}"? Esto elimina el audio y su config.`)) return;
+  await deleteSong(song);
+  songs = await listSongs();
+  if (currentSong?.id === id) currentSong = songs[0] ?? null;
+  loadedSongId = null;
+  refreshEditorView();
+  renderSongPicker();
+  editor?.toast("PISTA BORRADA", "#ff3b30");
+}
+
+// ============================================================================
+// EDITOR NUEVO (#screen-editor) — LÓGICA DE FASE 2
+// ============================================================================
+// Conventions:
+//  - `editingRests` (ya existía) es la lista de descansos en edición; la compartimos
+//    con el editor viejo para no duplicar estado. La onda nueva la dibuja editorWave.
+//  - chart.bpm/chart.offset reflejan la canción en edición (los setea openEditor).
+
+/** Stop de la audición del editor (audio + rAF). NO toca el runner del juego. */
+function editorStopPlayback(): void {
+  if (edPlaying || conductor.isRunning) {
+    conductor.pause();
+  }
+  edPlaying = false;
+  edSyncing = false;
+  edSyncCollector = null;
+  editor?.setPlaying(false);
+}
+
+/** Lazy-init del pintor de la onda (necesita los nodos que crea editor.ts). */
+function ensureEditorWave(): EditorWave | null {
+  if (!editor) return null;
+  if (!editorWave) {
+    const canvas = editor.getCanvas();
+    const box = editor.getWaveBox();
+    const overlays = box.querySelector<HTMLElement>(".ple-wave-overlays");
+    const ruler = box.parentElement?.querySelector<HTMLElement>(".ple-ruler") ?? null;
+    if (!overlays || !ruler) return null;
+    editorWave = new EditorWave(canvas, box, overlays, ruler);
+    // El placeholder "ONDA — SE DIBUJA EN FASE 2" ya no aplica: lo retiramos.
+    box.querySelector<HTMLElement>(".ple-wave-placeholder")?.remove();
+  }
+  return editorWave;
+}
+
+/** ¿La canción de edición está sincronizada a mano (grilla exacta)? */
+function editorSynced(): boolean {
+  return currentSong?.tempoSource === "manual";
+}
+
+/** Picos de la onda real (cacheados por canción) desde currentBuffer. */
+let edPeaks: Float32Array | null = null;
+let edPeaksFor: string | null = null;
+function editorPeaks(): Float32Array | null {
+  if (!currentBuffer || !currentSong) return null;
+  const cols = editor ? columnsForWidth(editor.getWaveBox().clientWidth || 900) : 300;
+  if (edPeaksFor === currentSong.id && edPeaks && edPeaks.length === cols) return edPeaks;
+  edPeaks = computePeaks(currentBuffer.getChannelData(0), cols);
+  edPeaksFor = currentSong.id;
+  return edPeaks;
+}
+
+/** Reconstruye el WaveModel actual y repinta la onda (barras+grilla+overlays+ruler). */
+function editorDrawWave(): void {
+  const wave = ensureEditorWave();
+  if (!wave) return;
+  if (!currentSong || !currentBuffer) {
+    wave.clear();
+    return;
+  }
+  const gs = editorGameStart();
+  wave.setModel({
+    peaks: editorPeaks(),
+    duration: currentBuffer.duration,
+    bpm: chart.bpm,
+    offset: chart.offset,
+    synced: editorSynced(),
+    accent: currentAccent,
+    rests: editingRests,
+    pendingStartBeat: edPendingStartBeat,
+    gameStart: gs.gameStart,
+    gameStartSet: gs.gameStartSet,
+  });
+}
+
+/** El INICIO DEL JUEGO guardado para la canción en edición (con default 0/false). */
+function editorGameStart(): { gameStart: number; gameStartSet: boolean } {
+  const cfg = currentSong ? loadConfig(currentSong.id) ?? currentSong : null;
+  return {
+    gameStart: cfg?.gameStart ?? 0,
+    gameStartSet: cfg?.gameStartSet ?? false,
+  };
+}
+
+/** El tiempo "actual" del editor: conductor.time si suena, si no el scrub visual. */
+function editorCurrentTime(): number {
+  return edPlaying ? conductor.time : edWaveTime;
+}
+
+/** Reloj "m:ss.d" para el transport del editor. */
+function formatClock(seconds: number): string {
+  const s = Math.max(0, seconds);
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  const d = Math.floor((s % 1) * 10);
+  return `${m}:${String(sec).padStart(2, "0")}.${d}`;
+}
+
+/** Refresca reloj + cabezal + monitor (beat/estado) del editor desde el tiempo actual. */
+function editorRefreshTransport(): void {
+  if (!editor || !currentBuffer) return;
+  const t = editorCurrentTime();
+  const dur = currentBuffer.duration || 1;
+  editor.setTime(formatClock(t));
+  editor.setPlayhead(t / dur);
+
+  // INICIO DEL JUEGO: label rosa "m:ss.d s" si está fijado; gris "sin definir" si no.
+  const gs = editorGameStart();
+  editor.setGameStart(
+    gs.gameStartSet ? `${formatClock(gs.gameStart)} s` : "sin definir",
+    gs.gameStartSet ? "#ff2e9a" : "#52525b",
+  );
+
+  // monitor: beat (si hay grilla) + estado (INTRO → DESCANSO → RITMO).
+  // INTRO = el cabezal está antes del INICIO DEL JUEGO (las flechas no arrancaron).
+  const spb = chart.bpm > 0 ? 60 / chart.bpm : 0;
+  const beat = spb > 0 ? Math.max(0, (t - chart.offset) / spb) : 0;
+  let state = "RITMO";
+  let color = currentAccent;
+  if (spb > 0) {
+    if (gs.gameStartSet && t < gs.gameStart) {
+      state = "INTRO";
+      color = "#ff2e9a";
+    } else if (restAt(Math.round(beat), editingRests)) {
+      state = "DESCANSO";
+      color = "#ffd021";
+    }
+  } else {
+    state = "—";
+    color = "#71717a";
+  }
+  editor.setMonitor({ beat: beat.toFixed(2), state, stateColor: color });
+}
+
+/** rAF del editor: mientras suena, sigue conductor.time (cabezal/monitor en vivo). */
+function ensureEditorLoop(): void {
+  if (edLooping) return;
+  edLooping = true;
+  requestAnimationFrame(editorLoop);
+}
+function editorLoop(): void {
+  // Sólo corre mientras el editor esté visible (si no, se apaga solo).
+  if (editorScreen.classList.contains("hidden")) {
+    edLooping = false;
+    return;
+  }
+  if (edPlaying) {
+    const dur = conductor.duration;
+    if (dur > 0 && conductor.time >= dur) {
+      // Fin del audio: parar y dejar el cabezal al final.
+      edWaveTime = dur;
+      editorStopPlayback();
+    } else {
+      edWaveTime = conductor.time;
+    }
+    editorRefreshTransport();
+  }
+  requestAnimationFrame(editorLoop);
+}
+
+// ---------------- transport (play/pausa/reinicio/clic-en-onda) ----------------
+
+/**
+ * Play/pausa de la audición. El Conductor reanuda desde su pausedAt (no hay seek
+ * arbitrario sin tocar core/), así que: si estaba en el final, reset a 0; arranca
+ * audio SIN scheduler (sin metrónomo) — sólo escuchar la canción para chequear sync.
+ */
+async function editorPlayPause(): Promise<void> {
+  if (!currentSong) {
+    editor?.toast("NO HAY PISTA", "#ff3b30");
+    return;
+  }
+  if (edSyncing) return; // durante el sync el transport lo maneja el sync
+  if (edPlaying) {
+    conductor.pause();
+    edWaveTime = conductor.time;
+    edPlaying = false;
+    editor?.setPlaying(false);
+    return;
+  }
+  // arrancar audición
+  try {
+    await conductor.resume();
+    await editorEnsureLoaded();
+  } catch {
+    editor?.toast("NO PUDE CARGAR EL AUDIO", "#ff3b30");
+    return;
+  }
+  if (conductor.duration > 0 && conductor.time >= conductor.duration - 0.05) {
+    conductor.reset();
+  }
+  conductor.start(); // reproduce desde pausedAt (0 tras reset)
+  edPlaying = true;
+  editor?.setPlaying(true);
+  ensureEditorLoop();
+}
+
+/** Reinicia la audición al principio (⏮). */
+function editorRestart(): void {
+  const wasPlaying = edPlaying;
+  // pause() detiene la fuente actual; reset() lleva pausedAt a 0; recién ahí re-start
+  // (si no, start() encadenaría una segunda fuente sin frenar la anterior).
+  if (conductor.isRunning) conductor.pause();
+  conductor.reset();
+  edWaveTime = 0;
+  if (wasPlaying) {
+    conductor.start();
+    edPlaying = true;
+    editor?.setPlaying(true);
+  }
+  editorRefreshTransport();
+}
+
+/**
+ * Clic sobre la onda. En modo "marcar descanso": marca inicio/fin (clic-clic) en
+ * beats. Si no: mueve el cabezal — VISUAL en pausa (el audio no salta, ver nota de
+ * arriba); si está sonando, no interrumpe (el cabezal sigue el audio real).
+ */
+function editorWaveClick(fraction: number): void {
+  if (!currentSong || !currentBuffer) return;
+  const wave = ensureEditorWave();
+  if (!wave) return;
+
+  if (edMarking) {
+    editorMarkAt(wave.beatForFraction(fraction));
+    return;
+  }
+  // scrub visual (sólo si no está sonando — sin seek de audio real).
+  if (!edPlaying) {
+    edWaveTime = fraction * currentBuffer.duration;
+    editorRefreshTransport();
+  }
+}
+
+// ---------------- panel 01: detección + BPM manual + tap-tempo ----------------
+
+/** DETECTAR AUTO: corre `guess` sobre el buffer y aplica BPM (tempoSource:'auto'). */
+async function editorDetect(): Promise<void> {
+  if (!currentSong) {
+    editor?.toast("NO HAY PISTA", "#ff3b30");
+    return;
+  }
+  editor?.toast("DETECTANDO BPM…", "#25e0ff");
+  try {
+    await conductor.resume();
+    await editorEnsureLoaded();
+    if (!currentBuffer) throw new Error("sin buffer");
+    const g = await guess(currentBuffer);
+    const bpm = (g as { tempo?: number }).tempo ?? g.bpm;
+    persistSong(currentSong, { bpm, offset: g.offset, tempoSource: "auto" });
+    chart.bpm = bpm;
+    chart.offset = g.offset;
+    editorAfterTempoChange();
+    editor?.toast(`BPM DETECTADO ≈ ${Math.round(bpm)}`, "#25e0ff");
+  } catch {
+    editor?.toast("NO PUDE DETECTAR EL BPM", "#ff3b30");
+  }
+}
+
+/** BPM manual ±: ajusta y marca tempoSource:'manual' (queda jugable/sincronizada). */
+function editorBpmStep(delta: number): void {
+  if (!currentSong) return;
+  const base = chart.bpm > 0 ? chart.bpm : 120;
+  const bpm = Math.max(40, Math.min(300, Math.round(base + delta)));
+  persistSong(currentSong, { bpm, tempoSource: "manual" });
+  chart.bpm = bpm;
+  editorAfterTempoChange();
+}
+
+/** Un golpe de tap-tempo: promedia intervalos (ventana de 2s) → BPM provisorio. */
+function editorTap(): void {
+  const now = performance.now();
+  if (edTapTimes.length && now - edTapTimes[edTapTimes.length - 1] > 2000) edTapTimes = [];
+  edTapTimes.push(now);
+  if (edTapTimes.length > 8) edTapTimes.shift();
+  if (edTapTimes.length >= 2) {
+    let sum = 0;
+    for (let i = 1; i < edTapTimes.length; i += 1) sum += edTapTimes[i] - edTapTimes[i - 1];
+    const avg = sum / (edTapTimes.length - 1);
+    edTapBpm = Math.max(40, Math.min(300, Math.round(60000 / avg)));
+  } else {
+    edTapBpm = null;
+  }
+  const canApply = edTapTimes.length >= 4 && edTapBpm !== null;
+  const readout = edTapBpm ? `${edTapBpm} BPM · ${edTapTimes.length} taps` : `${edTapTimes.length} tap`;
+  editor?.setTapReadout(readout, canApply, edTapBpm ? `✓ APLICAR ${edTapBpm} BPM` : undefined);
+  // auto-reset si dejan de tocar
+  clearTimeout(edTapResetTimer);
+  edTapResetTimer = window.setTimeout(() => {
+    edTapTimes = [];
+    edTapBpm = null;
+    editor?.setTapReadout("tocá 4+ veces", false);
+  }, 2600);
+}
+
+/** Aplica el BPM del tap-tempo (≥4 taps) como tempoSource:'manual'. */
+function editorApplyTap(): void {
+  if (!currentSong || edTapBpm === null || edTapTimes.length < 4) return;
+  persistSong(currentSong, { bpm: edTapBpm, tempoSource: "manual" });
+  chart.bpm = edTapBpm;
+  editor?.toast(`TEMPO APLICADO · ${edTapBpm} BPM`, "#c8ff1e");
+  edTapTimes = [];
+  edTapBpm = null;
+  clearTimeout(edTapResetTimer);
+  editor?.setTapReadout("tocá 4+ veces", false);
+  editorAfterTempoChange();
+}
+
+// ---------------- panel 02: sync-por-anclas + offset fino ----------------
+
+/** Arranca el sync-por-anclas: audio sonando + AnchorCollector; ESPACIO = palmeo. */
+async function editorSyncStart(): Promise<void> {
+  if (!currentSong) {
+    editor?.toast("NO HAY PISTA", "#ff3b30");
+    return;
+  }
+  try {
+    await conductor.resume();
+    await editorEnsureLoaded();
+  } catch {
+    editor?.toast("NO PUDE CARGAR EL AUDIO", "#ff3b30");
+    return;
+  }
+  // arrancar audio desde 0 para palmear de punta a punta (frenar la fuente previa).
+  if (conductor.isRunning) conductor.pause();
+  conductor.reset();
+  edWaveTime = 0;
+  conductor.start();
+  edPlaying = true;
+  edSyncing = true;
+  edSyncCollector = new AnchorCollector(chart.bpm > 0 ? chart.bpm : 120);
+  editor?.setPlaying(true);
+  editorRenderSyncReadout();
+  ensureEditorLoop();
+  editor?.toast("PALMEÁ ESPACIO EN CADA PULSO", "#c8ff1e");
+}
+
+/** Un palmeo del sync (lo dispara ESPACIO). Igual que onSyncTap del editor viejo. */
+function editorSyncTap(): void {
+  if (!edSyncCollector) return;
+  edSyncCollector.add(conductor.time - conductor.audioOffsetSec);
+  const fit = edSyncCollector.fit;
+  if (edSyncCollector.count >= 2) {
+    chart.bpm = fit.bpm;
+    chart.offset = fit.offset;
+    editorDrawWave(); // la grilla se reajusta en vivo mientras palmea
+  }
+  editorRenderSyncReadout();
+}
+
+/** Vuelca el TempoFit del collector a editor.setSyncReadout (BPM/offset/confianza). */
+function editorRenderSyncReadout(): void {
+  if (!editor) return;
+  const c = edSyncCollector;
+  if (!c || c.count < 2) {
+    editor.setSyncReadout({
+      bpm: "—",
+      offset: "—",
+      confidence: "marcá 3+ pulsos",
+      count: c ? `${c.count} marcas` : "—",
+      active: edSyncing,
+    });
+    return;
+  }
+  const fit = c.fit;
+  editor.setSyncReadout({
+    bpm: fit.bpm.toFixed(1),
+    offset: formatMs(fit.offset),
+    confidence:
+      fit.rSquared !== null && fit.residualMs !== null
+        ? `r² ${fit.rSquared.toFixed(3)} · ±${Math.round(fit.residualMs)} ms`
+        : "marcá 3+ pulsos",
+    count: `${fit.anchorCount} marcas · ${fit.spanSec.toFixed(0)} s`,
+    active: edSyncing,
+  });
+}
+
+/** Guarda el fit del sync (tempoSource:'manual') y refresca todo. */
+function editorSyncSave(): void {
+  if (!currentSong || !edSyncCollector || edSyncCollector.count < 2) {
+    editor?.toast("PALMEÁ MÁS PULSOS", "#ff3b30");
+    return;
+  }
+  const fit = edSyncCollector.fit;
+  persistSong(currentSong, { bpm: fit.bpm, offset: fit.offset, tempoSource: "manual" });
+  chart.bpm = fit.bpm;
+  chart.offset = fit.offset;
+  editorStopPlayback();
+  edWaveTime = 0;
+  editorAfterTempoChange();
+  editor?.setSyncReadout({ bpm: fit.bpm.toFixed(1), offset: formatMs(fit.offset), confidence: "✓ guardado", count: `${fit.anchorCount} marcas`, active: false });
+  editor?.toast("SYNC GUARDADO ✓", "#c8ff1e");
+}
+
+/** Cancela el sync en curso (descarta el collector). */
+function editorSyncCancel(): void {
+  editorStopPlayback();
+  editorRenderSyncReadout();
+  editor?.toast("SYNC CANCELADO", "#ff3b30");
+}
+
+/**
+ * Fija el INICIO DEL JUEGO en la posición del cabezal (▶ ARRANCAR EN EL CABEZAL).
+ * Validaciones del diseño: NO al final (sec >= len-1) y NO sobre/después de un
+ * descanso (las flechas tienen que arrancar ANTES del primer descanso). Persiste
+ * gameStart/gameStartSet y refresca onda (intro+marcador) + monitor + status.
+ */
+function editorFixGameStart(): void {
+  if (!currentSong || !currentBuffer) {
+    editor?.toast("NO HAY PISTA", "#ff3b30");
+    return;
+  }
+  const sec = Math.round(editorCurrentTime() * 1000) / 1000;
+  const dur = currentBuffer.duration;
+  if (sec >= dur - 1) {
+    editor?.toast("EL INICIO ESTÁ DEMASIADO AL FINAL", "#ff3b30");
+    return;
+  }
+  // El inicio tiene que ir ANTES del primer descanso: si cae sobre/después del
+  // arranque de algún descanso, choca. (rests en beats → segundos por la grilla.)
+  const spb = chart.bpm > 0 ? 60 / chart.bpm : 0.5;
+  if (editingRests.some((r) => sec >= chart.offset + r.atBeat * spb)) {
+    editor?.toast("EL INICIO CHOCA CON UN DESCANSO", "#ff3b30");
+    return;
+  }
+  persistSong(currentSong, { gameStart: sec, gameStartSet: true });
+  editorDrawWave();
+  editorRefreshTransport();
+  renderEditorSong(); // refresca el status pill (FALTA INICIO → LISTA)
+  editor?.toast(`INICIO DEL JUEGO @ ${formatClock(sec)}`, "#ff2e9a");
+}
+
+/** Offset fino ±5 / ±1 ms → ajusta chart.offset, persiste y redibuja la grilla. */
+function editorOffsetStep(deltaMs: number): void {
+  if (!currentSong) return;
+  chart.offset += deltaMs / 1000;
+  persistSong(currentSong, { offset: chart.offset });
+  editor?.setOffset(formatMs(chart.offset));
+  editorDrawWave();
+  editorRefreshTransport();
+}
+
+// ---------------- panel 03: descansos sobre la onda ----------------
+
+/** Toggle del modo "marcar descanso" (clic-clic sobre la onda). */
+function editorToggleMark(): void {
+  if (!editorSynced()) {
+    editor?.toast("SINCRONIZÁ PRIMERO (PANEL 02)", "#ffd021");
+    return;
+  }
+  edMarking = !edMarking;
+  if (!edMarking) edPendingStartBeat = null;
+  editor?.setMarkMode(edMarking, edPendingStartBeat !== null);
+  editorDrawWave();
+}
+
+/** Marca el inicio o el final de un descanso en `beat` (redondeado a entero). */
+function editorMarkAt(beat: number): void {
+  if (edPendingStartBeat === null) {
+    edPendingStartBeat = beat;
+    editor?.setMarkMode(true, true);
+    editorDrawWave();
+    return;
+  }
+  const start = Math.round(Math.min(edPendingStartBeat, beat));
+  const end = Math.round(Math.max(edPendingStartBeat, beat));
+  edPendingStartBeat = null;
+  if (end - start < 1) {
+    editor?.setMarkMode(true, false);
+    editorDrawWave();
+    editor?.toast("DESCANSO MUY CORTO", "#ff3b30");
+    return;
+  }
+  editingRests.push({ atBeat: start, durationBeats: end - start });
+  editingRests = sortRests(editingRests);
+  edMarking = false;
+  editor?.setMarkMode(false, false);
+  if (currentSong) persistSong(currentSong, { rests: sortRests(editingRests) });
+  editorRenderBreaks();
+  editorDrawWave();
+  editor?.toast("DESCANSO MARCADO", "#ffd021");
+}
+
+/** Borra un descanso por su índice en la lista ORDENADA (la que ve el usuario). */
+function editorDelRest(id: string): void {
+  const i = Number(id);
+  const sorted = sortRests(editingRests);
+  if (!Number.isInteger(i) || i < 0 || i >= sorted.length) return;
+  const target = sorted[i];
+  // borrar la PRIMer ocurrencia que matchee (atBeat+durationBeats) en el array real.
+  const idx = editingRests.findIndex(
+    (r) => r.atBeat === target.atBeat && r.durationBeats === target.durationBeats,
+  );
+  if (idx < 0) return;
+  editingRests.splice(idx, 1);
+  if (currentSong) persistSong(currentSong, { rests: sortRests(editingRests) });
+  editorRenderBreaks();
+  editorDrawWave();
+  editor?.toast("DESCANSO BORRADO", "#ff3b30");
+}
+
+/** Pinta la lista de descansos (panel 03) desde editingRests. */
+function editorRenderBreaks(): void {
+  if (!editor) return;
+  const spb = chart.bpm > 0 ? 60 / chart.bpm : 0.5;
+  editor.renderBreaks(
+    sortRests(editingRests).map((r, k) => {
+      const startSec = chart.offset + r.atBeat * spb;
+      const endSec = startSec + r.durationBeats * spb;
+      const bars = r.durationBeats / BEATS_PER_BAR;
+      const dur =
+        bars >= 1
+          ? `${Math.round(bars)} ${Math.round(bars) === 1 ? "compás" : "compases"}`
+          : `${(r.durationBeats * spb).toFixed(1)} s de pausa`;
+      return {
+        id: String(k),
+        range: `${formatTime(startSec)} → ${formatTime(endSec)}`,
+        dur,
+      };
+    }),
+  );
+}
+
+// ---------------- acciones: Probar (→ #screen-play) + Export JSON ----------------
+
+/** Probar → corre el juego real en #screen-play; al salir/terminar vuelve al editor. */
+async function editorProbar(): Promise<void> {
+  if (!currentSong) {
+    editor?.toast("NO HAY PISTA", "#ff3b30");
+    return;
+  }
+  if (!editorSynced()) {
+    editor?.toast("SINCRONIZÁ PRIMERO PARA PROBAR", "#ffd021");
+    return;
+  }
+  editorStopPlayback();
+  // Guardamos lo que esté en edición (descansos) para que Probar lo respete.
+  persistSong(currentSong, { rests: sortRests(editingRests) });
+  returnToEditorAfterPlay = true; // al salir/terminar, volver al editor (no a SELECT)
+  // menu.showPlay() NO conoce #screen-editor: lo ocultamos a mano (si no, quedaría
+  // visible bajo #screen-play y el editorLoop seguiría creyéndose activo).
+  editorScreen.classList.add("hidden");
+  await play("play");
+}
+
+/** Exporta la SongConfig actual como JSON descargable ({slug}.chart.json). */
+function editorExport(): void {
+  if (!currentSong) {
+    editor?.toast("NO HAY PISTA", "#ff3b30");
+    return;
+  }
+  const cfg = loadConfig(currentSong.id) ?? currentSong;
+  const data = {
+    title: cfg.title,
+    bpm: cfg.bpm,
+    offset: cfg.offset,
+    tempoSource: cfg.tempoSource,
+    difficulty: cfg.difficulty,
+    rests: sortRests(editingRests),
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${slugify(cfg.title)}.chart.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  editor?.toast(`EXPORTADO · ${a.download}`, "#25e0ff");
+}
+
+// ---------------- helpers compartidos del editor nuevo ----------------
+
+/** Asegura que el audio de la canción actual esté decodificado en currentBuffer. */
+async function editorEnsureLoaded(): Promise<void> {
+  const song = currentSong;
+  if (!song) throw new Error("sin pista");
+  if (loadedSongId === song.id && currentBuffer) return;
+  const url = await getAudioUrl(song);
+  if (!url) throw new Error("sin audio");
+  currentBuffer = await conductor.load(url);
+  currentEnergy = analyzeEnergy(currentBuffer.getChannelData(0), currentBuffer.sampleRate);
+  loadedSongId = song.id;
+  edPeaks = null; // invalida cache de picos (cambió de buffer)
+  songDurations.set(song.id, formatTime(currentBuffer.duration));
+}
+
+/** Tras cambiar el tempo (detect/tap/bpm/sync): refresca header, grilla, descansos. */
+function editorAfterTempoChange(): void {
+  renderEditorSong();
+  editorRenderBreaks();
+  editorDrawWave();
+  editorRefreshTransport();
+  // mantener el editor viejo y el song select en sync también
+  showSongInfo();
+  renderSongPicker();
+}
+
 // Pantalla de resultados (#screen-result).
 const result = createResult($("screen-result"), {
   onRetry: () => void play("play"),
-  onBackToList: () => menu.showSelect(),
+  // Si veníamos del "Probar" del editor, "volver" regresa al editor; si no, a SELECT.
+  onBackToList: () => {
+    if (returnToEditorAfterPlay) {
+      returnToEditorAfterPlay = false;
+      showEditorScreen();
+    } else {
+      menu.showSelect();
+    }
+  },
 });
 
 // "◄ Pistas": volver del juego al SONG SELECT.

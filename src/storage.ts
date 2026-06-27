@@ -22,6 +22,14 @@ export interface SongConfig {
   rests: Rest[];
   /** Dificultad elegida para esta canción: define la rampa progresiva. */
   difficulty: DifficultyName;
+  /**
+   * INICIO DEL JUEGO (segundos): dónde arrancan realmente las flechas. El intro
+   * (de 0 a gameStart) suena pero NO exige input. Distinto del primer beat / offset
+   * (que alinea la grilla). Default 0 = sin intro (arranca como siempre).
+   */
+  gameStart: number;
+  /** ¿El usuario fijó el inicio del juego? false = sin definir (compat: arranca en 0). */
+  gameStartSet: boolean;
 }
 
 // --- canciones que vienen con el juego ---
@@ -42,6 +50,8 @@ function defaultConfig(id: string, title: string, source: SongConfig["source"]):
     tempoSource: "none",
     rests: [],
     difficulty: "normal",
+    gameStart: 0,
+    gameStartSet: false,
   };
 }
 
@@ -59,6 +69,10 @@ export function loadConfig(id: string): SongConfig | null {
   // Migración: las configs guardadas antes de la dificultad progresiva no traen
   // el campo. Sin esto, currentSong.difficulty sería undefined y la rampa fallaría.
   if (!config.difficulty) config.difficulty = "normal";
+  // Migración: el INICIO DEL JUEGO se agregó después. Las configs viejas (y builtins
+  // sin tocar) no lo traen → default 0/false: el juego arranca como siempre.
+  if (typeof config.gameStart !== "number") config.gameStart = 0;
+  if (typeof config.gameStartSet !== "boolean") config.gameStartSet = false;
   return config;
 }
 
