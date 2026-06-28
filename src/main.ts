@@ -44,6 +44,11 @@ const APPROACH_BEATS = 4;
 const AFTER_BEATS = 1;
 const LEAD_IN_BEATS = 8; // "preparate" antes de la primera secuencia (siempre)
 const WARMUP_SEC = 8; // arranque suave: la densidad por energía se "abre" en estos segundos
+// Ventana de la cuenta regresiva del intro (segundos antes del INICIO DEL JUEGO). La
+// usan a la vez: la cuenta "3·2·1·¡VAMOS!" (renderCountdown) Y el PREVIEW de la primera
+// secuencia (que aparece quieta al iniciar la cuenta, en el "3"). Mismo número → la
+// secuencia se ve durante TODA la cuenta.
+const COUNTDOWN_LEAD_SEC = 3;
 
 const chart: Chart = { title: "Metrónomo", bpm: 120, offset: 0, bars: [] };
 const conductor = new Conductor(chart);
@@ -66,6 +71,11 @@ let activeBar: Bar | null = null;
 let tracker: SequenceTracker | null = null;
 let nextBarCommit = 0;
 let pendingSpawn = false;
+// ¿La barra pendiente es la PRIMERA de la partida? La primera se adelanta para que las
+// flechas se vean en PREVIEW (quietas) desde el arranque de la cuenta regresiva (~3s
+// antes del commit), no en su ventana normal de spawn. Las demás barras spawnean igual
+// que siempre (APPROACH_BEATS). El commit real NO cambia (sigue en gameStart).
+let firstBarPending = false;
 let waitMessage = "";
 let currentRests: Rest[] = [];
 // INICIO DEL JUEGO efectivo de la canción en juego (segundos). 0 = arranca como
@@ -464,6 +474,7 @@ function stopPlayback(): void {
   // Cerrar la ventana del countdown del intro: sin partida activa no debe dispararse.
   gameStartTime = -1;
   countdownGoUntil = 0;
+  firstBarPending = false;
   syncCollector = null;
   syncPanel.classList.add("hidden");
   renderSequence();
@@ -558,6 +569,9 @@ async function play(view: RunnerView = "play"): Promise<void> {
   // 3s previos a que arranquen las flechas. countdownGoUntil=0 = nada mostrándose aún.
   gameStartTime = runnerView === "play" ? beatToTime(firstCommit) : -1;
   countdownGoUntil = 0;
+  // Sólo en el juego real adelantamos el preview de la primera secuencia (junto con la
+  // cuenta regresiva). En "panel" (editor viejo) el spawn es el normal.
+  firstBarPending = runnerView === "play";
   ensureLoop();
 }
 
@@ -969,11 +983,22 @@ function currentIntensity(): number {
 }
 
 function maybeSpawnPending(): void {
-  if (!pendingSpawn || conductor.beat < nextBarCommit - APPROACH_BEATS) return;
+  if (!pendingSpawn) return;
+  // La PRIMERA barra del juego real se adelanta: aparece (quieta, en preview) al
+  // arrancar la cuenta regresiva (~COUNTDOWN_LEAD_SEC antes del commit), no en su
+  // ventana normal. Así el jugador ve las flechas durante toda la cuenta. El playhead
+  // sigue clavado en 0% (renderTimingPlay da progress<0 → clamp) hasta la ventana de
+  // aproximación normal, y recién ahí empieza a correr (cerca de "¡VAMOS!"). El commit
+  // NO cambia. Las demás barras usan el gate de siempre (APPROACH_BEATS).
+  const previewReady =
+    firstBarPending && gameStartTime >= 0 && conductor.time >= gameStartTime - COUNTDOWN_LEAD_SEC;
+  const approachReady = conductor.beat >= nextBarCommit - APPROACH_BEATS;
+  if (!previewReady && !approachReady) return;
   const sequence = makeSequence(rampAt(currentIntensity(), activePreset()).sequenceLength);
   activeBar = { commitBeat: nextBarCommit, sequence };
   tracker = new SequenceTracker(sequence);
   pendingSpawn = false;
+  firstBarPending = false;
   renderSequence();
 }
 

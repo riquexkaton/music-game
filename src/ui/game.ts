@@ -172,12 +172,6 @@ export function createGame(root: HTMLElement, hooks: GameHooks): GameApi {
       <div class="pl-emote-layer" id="plg-emote-layer"></div>
       <div class="pl-alert-layer" id="plg-alert-layer"></div>
 
-      <!-- CUENTA REGRESIVA del intro (3·2·1·¡VAMOS!) — overlay central, lo cablea
-           main.ts por TIEMPO en los ~3s previos al INICIO DEL JUEGO. Sólo vive en el
-           intro: ni bien arrancan las flechas (o hay descanso) se oculta (label=null). -->
-      <div class="pl-countdown" id="plg-countdown" hidden>
-        <div class="pl-countdown-num" id="plg-countdown-num"></div>
-      </div>
 
       <div class="pl-gamecol">
         <canvas class="pl-wave-canvas" id="plg-wave"></canvas>
@@ -230,6 +224,14 @@ export function createGame(root: HTMLElement, hooks: GameHooks): GameApi {
           <div class="pl-center">
             <div class="pl-judg" id="plg-judg">
               <div class="pl-judg-idle" id="plg-judg-idle">PREPARADO</div>
+              <!-- CUENTA REGRESIVA del intro (3·2·1·¡VAMOS!) — vive en el SLOT SUPERIOR
+                   (donde va el judgment/"PREPARADO", vacío durante el intro), ARRIBA de
+                   la fila de flechas para NO taparlas. Absoluto + centrado en este slot:
+                   el número gigante desborda hacia arriba sin reflowear las flechas. Lo
+                   cablea main.ts por TIEMPO en los ~3s previos al INICIO DEL JUEGO. -->
+              <div class="pl-countdown" id="plg-countdown" hidden>
+                <div class="pl-countdown-num" id="plg-countdown-num"></div>
+              </div>
               <div class="pl-break" id="plg-break" hidden>
                 <div class="pl-break-eyebrow">DESCANSO</div>
                 <div class="pl-break-count">
@@ -541,9 +543,14 @@ export function createGame(root: HTMLElement, hooks: GameHooks): GameApi {
     if (label === null) {
       countdownEl.hidden = true;
       countdownNumEl.textContent = "";
+      // Restaurar el idle "PREPARADO" del slot, salvo que mande un descanso o un stamp
+      // vivo (misma regla que showJudgment/setBreak: no re-mostrar el idle si no toca).
+      judgIdleEl.hidden = breaking || judgEl.querySelector(".pl-judg-stamp") !== null;
       return;
     }
     const go = label === "¡VAMOS!"; // el golpe final tiñe en lima y pega más fuerte
+    // El countdown ocupa el slot superior: ocultar el idle para que no se vea detrás.
+    judgIdleEl.hidden = true;
     countdownEl.hidden = false;
     countdownNumEl.textContent = label;
     countdownNumEl.classList.toggle("go", go);

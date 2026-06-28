@@ -873,7 +873,9 @@ body {
 
 /* center */
 .pl-center { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; min-height: 0; width: 100%; }
-.pl-judg { height: 120px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+/* position:relative → ancla la cuenta regresiva (.pl-countdown) a ESTE slot, no al
+   field, para que el número se ubique justo ARRIBA de las flechas sin taparlas. */
+.pl-judg { position: relative; height: 120px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
 .pl-judg-idle { font-family: var(--font-display); font-size: clamp(44px, 7vw, 84px); line-height: 0.9; letter-spacing: -0.03em; color: rgba(244, 242, 233, 0.14); text-transform: uppercase; text-shadow: 0 2px 18px rgba(0, 0, 0, 0.5); }
 .pl-judg-idle[hidden] { display: none; }
 .pl-judg-stamp { animation: pl-stamp 0.4s both; display: flex; flex-direction: column; align-items: center; }
@@ -892,22 +894,30 @@ body {
 .pl-break-hint { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.16em; color: var(--ghost); text-transform: uppercase; }
 
 /* --- CUENTA REGRESIVA del intro (3·2·1·¡VAMOS!) ---
-   Overlay central sobre TODO el field (no sólo el slot central): durante el intro el
-   centro está libre (sin descanso ni judgment), así que ocupa la pantalla y pega
-   fuerte. z-index 8 = por encima del HUD/personaje/flash, debajo del FX canvas (7 es
-   para partículas de acierto, que en el intro no existen). pointer-events:none: no
-   roba clics. La visibilidad la maneja el atributo [hidden] (game.setCountdown). */
+   Vive DENTRO del slot del judgment (.pl-judg), que está vacío durante el intro y
+   queda ARRIBA de la fila de flechas → así el número grande NO tapa las flechas (el
+   jugador las ve en preview durante toda la cuenta). Absoluto + centrado sobre el
+   slot: el número desborda hacia arriba/abajo sin reflowear nada. z-index 8 = por
+   encima del idle/personaje/flash, debajo del FX canvas (7 son partículas de acierto,
+   inexistentes en el intro). pointer-events:none. Visibilidad por [hidden]. */
 .pl-countdown {
-  position: absolute; inset: 0; z-index: 8; pointer-events: none;
-  display: flex; align-items: center; justify-content: center;
+  /* Anclado al slot del judgment (.pl-judg) pero CRECIENDO HACIA ARRIBA: el borde
+     inferior del número queda ~en el centro del slot y el resto sube hacia el espacio
+     vacío entre el HUD y las flechas. align-items:flex-end → la base del número no baja
+     más allá de `bottom`, así NUNCA invade la fila de flechas (que está debajo). */
+  position: absolute; left: 50%; bottom: 50%; transform: translateX(-50%);
+  width: max-content; max-width: 92vw; height: 0;
+  z-index: 8; pointer-events: none;
+  display: flex; align-items: flex-end; justify-content: center;
 }
 .pl-countdown[hidden] { display: none; }
 .pl-countdown-num {
-  font-family: var(--font-display);
-  font-size: clamp(90px, 16vw, 200px); line-height: 0.82;
+  font-family: var(--font-display); white-space: nowrap;
+  font-size: clamp(72px, 12vw, 150px); line-height: 0.82;
   letter-spacing: -0.04em; text-transform: uppercase;
   color: var(--paper); text-shadow: 8px 8px 0 #000, 0 0 60px rgba(0, 0, 0, 0.55);
   animation: pl-count-pop 0.46s cubic-bezier(0.2, 0.75, 0.2, 1) both;
+  transform-origin: center bottom;
 }
 /* "¡VAMOS!" — acento lima, más impacto (golpe + glow del acento). */
 .pl-countdown-num.go {
