@@ -436,7 +436,6 @@ export function createEditor(root: HTMLElement, hooks: EditorHooks): EditorApi {
   const trackCountEl = $("ple-track-count");
   const trackListEl = $("ple-track-list");
   const uploadBtn = $("ple-upload") as HTMLButtonElement;
-  const songAccentEl = $("ple-song-accent");
   const songTitleEl = $("ple-song-title");
   const songMetaEl = $("ple-song-meta");
   const songBpmEl = $("ple-song-bpm");
@@ -495,7 +494,6 @@ export function createEditor(root: HTMLElement, hooks: EditorHooks): EditorApi {
 
   // ---------------- botones de dificultad (header) ----------------
   // Se construyen una vez; setSong marca el activo según la canción.
-  let currentDiff: DifficultyName = "normal";
   for (const d of DIFFS) {
     const btn = document.createElement("button");
     btn.type = "button";
@@ -506,7 +504,6 @@ export function createEditor(root: HTMLElement, hooks: EditorHooks): EditorApi {
     diffBtnsEl.appendChild(btn);
   }
   function markDiff(diff: DifficultyName): void {
-    currentDiff = diff;
     diffBtnsEl.querySelectorAll<HTMLElement>(".ple-diff-btn").forEach((el) => {
       el.classList.toggle("on", el.dataset.diff === diff);
     });
