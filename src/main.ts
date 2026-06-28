@@ -1676,7 +1676,23 @@ function editorLoop(): void {
     if (dur > 0 && conductor.time >= dur) {
       // Fin del audio: parar y dejar el cabezal al final.
       edWaveTime = dur;
-      editorStopPlayback();
+      if (edSyncing) {
+        // Durante el sync por anclas NO usamos editorStopPlayback (borraría las
+        // marcas y te exigiría ponerlas de nuevo). Sólo frenamos el audio y
+        // conservamos las anclas/estado para que igual puedas GUARDAR (o CANCELAR).
+        conductor.pause();
+        edPlaying = false;
+        editor?.setPlaying(false);
+        editorRenderSyncReadout();
+        editor?.toast(
+          edAnchor0 !== null && edAnchor1 !== null
+            ? "FIN DE LA CANCIÓN — GUARDÁ EL SYNC"
+            : "FIN DE LA CANCIÓN — CANCELÁ Y VOLVÉ A EMPEZAR",
+          "#25e0ff",
+        );
+      } else {
+        editorStopPlayback();
+      }
     } else {
       edWaveTime = conductor.time;
     }
@@ -1887,7 +1903,9 @@ async function editorSyncStart(): Promise<void> {
 
 /** Un ESPACIO durante el sync: marca la 1ª ancla, luego la 2ª (la lejana). */
 function editorSyncTap(): void {
-  if (!edSyncing) return;
+  // Sólo se marca con el audio SONANDO: si la canción terminó (edPlaying=false pero
+  // edSyncing sigue true para poder GUARDAR), un ESPACIO no debe re-marcar el ancla.
+  if (!edSyncing || !edPlaying) return;
   const t = conductor.time - conductor.audioOffsetSec;
   if (edAnchor0 === null) {
     edAnchor0 = t;
