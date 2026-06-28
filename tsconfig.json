@@ -9,6 +9,7 @@
     "noUnusedParameters": true,
     "noImplicitReturns": true,
     "isolatedModules": true,
+    "noEmit": true,
     "skipLibCheck": true,
     "types": []
   },

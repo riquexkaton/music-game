@@ -15,6 +15,9 @@ dist/
 dist-ssr/
 *.local
 
+# tsc-emitted JS next to TS sources (project is TS-only; tsc uses noEmit — safety net)
+src/**/*.js
+
 # Vite cache
 .vite/
 
