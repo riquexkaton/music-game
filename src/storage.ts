@@ -33,10 +33,61 @@ export interface SongConfig {
 }
 
 // --- canciones que vienen con el juego ---
-const BUILTINS: { id: string; title: string }[] = [
-  { id: "skyline-pulse", title: "Skyline Pulse" },
-  { id: "amor-a-oscuras", title: "Amor a Oscuras" },
-  { id: "tres-vasos-y-un-secreto", title: "Tres Vasos y Un Secreto" },
+// Una canción builtin puede traer un `chart` SINCRONIZADO de fábrica: así viaja con
+// el juego ya lista para jugar (sin pasar por el editor). Sin `chart`, arranca sin
+// sync (bpm 0, tempoSource 'none') como las viejas. El audio SIEMPRE vive en
+// public/songs/{id}/audio.mp3 — ese archivo hay que ponerlo aparte (no está acá).
+type BuiltinChart = Partial<
+  Pick<
+    SongConfig,
+    "bpm" | "offset" | "tempoSource" | "rests" | "difficulty" | "gameStart" | "gameStartSet"
+  >
+>;
+
+interface BuiltinDef {
+  id: string;
+  title: string;
+  /** Si está, la canción viene SINCRONIZADA de fábrica (jugable sin tocar el editor). */
+  chart?: BuiltinChart;
+}
+
+// Las canciones que vienen con el juego, en orden. TODAS vienen SINCRONIZADAS de
+// fábrica (con su `chart`): un juego rítmico no se lanza sin canciones listas para
+// jugar. El audio de cada una vive en public/songs/{id}/audio.mp3.
+const BUILTINS: BuiltinDef[] = [
+  {
+    id: "agnes-tachyon-low-cortisol-dance-full-song",
+    title: "Agnes Tachyon - LOW CORTISOL DANCE (Full Song)",
+    chart: {
+      bpm: 128.01068573738547,
+      offset: 32.06735745715603,
+      tempoSource: "manual",
+      gameStart: 32.219,
+      gameStartSet: true,
+    },
+  },
+  {
+    id: "audition-with-you",
+    title: "Audition - With You",
+    chart: {
+      bpm: 151.1625422786849,
+      offset: 35.408831056044484,
+      tempoSource: "manual",
+      gameStart: 34.961,
+      gameStartSet: true,
+    },
+  },
+  {
+    id: "corre-hasta-el-final",
+    title: "끝까지 달려가 (Corre hasta el final)",
+    chart: {
+      bpm: 153,
+      offset: 18.02666666666675,
+      tempoSource: "manual",
+      gameStart: 18.131,
+      gameStartSet: true,
+    },
+  },
 ];
 
 function defaultConfig(id: string, title: string, source: SongConfig["source"]): SongConfig {
@@ -53,6 +104,11 @@ function defaultConfig(id: string, title: string, source: SongConfig["source"]):
     gameStart: 0,
     gameStartSet: false,
   };
+}
+
+/** Config de fábrica de un builtin: el default + el chart horneado (si lo trae). */
+function builtinConfig(b: BuiltinDef): SongConfig {
+  return { ...defaultConfig(b.id, b.title, "builtin"), ...b.chart };
 }
 
 // ---------------- config en localStorage ----------------
@@ -136,13 +192,19 @@ export function slugify(name: string): string {
 
 /** Todas las canciones: builtin + subidas. Cada una con su config guardada (o default). */
 export async function listSongs(): Promise<SongConfig[]> {
-  const builtins = BUILTINS.map(
-    (b) => loadConfig(b.id) ?? defaultConfig(b.id, b.title, "builtin"),
-  );
+  const builtinIds = new Set(BUILTINS.map((b) => b.id));
+  const builtins = BUILTINS.map((b) => {
+    const fab = builtinConfig(b);
+    const saved = loadConfig(b.id);
+    // Si hay config guardada (el usuario re-editó, o quedó una versión 'uploaded'
+    // vieja con el mismo id en tu navegador) respetamos sus campos pero FORZAMOS que
+    // sea builtin (source + audioPath + title de fábrica): el audio sale de public/songs.
+    return saved ? { ...saved, source: "builtin" as const, audioPath: fab.audioPath, title: fab.title } : fab;
+  });
   const uploadedIds = await audioKeys();
-  const uploaded = uploadedIds.map(
-    (id) => loadConfig(id) ?? defaultConfig(id, id, "uploaded"),
-  );
+  const uploaded = uploadedIds
+    .filter((id) => !builtinIds.has(id)) // no duplicar un builtin que también esté en IndexedDB
+    .map((id) => loadConfig(id) ?? defaultConfig(id, id, "uploaded"));
   return [...builtins, ...uploaded];
 }
 
