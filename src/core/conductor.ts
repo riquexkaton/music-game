@@ -84,6 +84,25 @@ export class Conductor {
     this.stopSource();
   }
 
+  /**
+   * Salta a una posición arbitraria (segundos) de la canción. Lo usa el editor para
+   * moverse sin tener que escuchar todo (p. ej. ir al final a marcar la 2ª ancla).
+   * Un AudioBufferSourceNode NO se re-posiciona: si está sonando, lo paramos y
+   * arrancamos uno nuevo desde el destino (mismo patrón que start()); si está en
+   * pausa, sólo movemos pausedAt para que el próximo start() arranque desde ahí.
+   * Se clampa a [0, duración]. `start(hadAudio)` preserva si sonaba audio o sólo
+   * el reloj (calibración con start(false)).
+   */
+  seek(seconds: number): void {
+    const max = this.buffer ? this.buffer.duration : Infinity;
+    const target = Math.max(0, Math.min(seconds, max));
+    const wasRunning = this.running;
+    const hadAudio = this.source !== null;
+    if (wasRunning) this.pause();
+    this.pausedAt = target;
+    if (wasRunning) this.start(hadAudio);
+  }
+
   private stopSource(): void {
     if (this.source) {
       this.source.stop();

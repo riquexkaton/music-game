@@ -92,6 +92,39 @@ export function fitTempo(anchors: Anchor[]): TempoFit {
   return { bpm, offset, rSquared, residualMs, anchorCount: n, spanSec };
 }
 
+/**
+ * SYNC POR 2 ANCLAS LEJANAS. El usuario marca el tiempo de un downbeat temprano
+ * (lo tomamos como beat 0) y otro tardío, declarando cuántos beats hay entre ambos
+ * (`beatsBetween`). Como el SPAN manda (el error de pendiente escala ~1/span), dos
+ * marcas bien separadas clavan el BPM casi tan bien como palmear toda la canción,
+ * con sólo 2 toques.
+ *
+ * NO usamos AnchorCollector acá: ese infiere el beatIndex redondeando contra la
+ * mediana de los intervalos (asume taps CONSECUTIVOS) y con 2 taps lejanos los
+ * trataría como beats 0 y 1. Acá el beatIndex de la 2ª ancla lo da el usuario.
+ *
+ * Devuelve el mismo TempoFit que fitTempo (con 2 puntos, rSquared/residualMs = null:
+ * la recta siempre pasa exacto por 2 puntos, no hay confianza estadística que medir).
+ */
+export function fitTwoAnchors(t0: number, t1: number, beatsBetween: number): TempoFit {
+  return fitTempo([
+    { beatIndex: 0, timeSec: t0 },
+    { beatIndex: Math.max(1, Math.round(beatsBetween)), timeSec: t1 },
+  ]);
+}
+
+/**
+ * Estima cuántos beats hay entre dos marcas usando un BPM SEMILLA (el detectado o
+ * uno por defecto), redondeando al beat entero. Es sólo un punto de partida que el
+ * usuario CONFIRMA/ajusta: en spans largos un error de semilla de ~1 BPM ya puede
+ * desviar el conteo, y un conteo errado por 1 corre todo el BPM. Por eso se muestra
+ * para confirmar, no se da por sentado.
+ */
+export function beatsBetweenTaps(t0: number, t1: number, seedBpm: number): number {
+  const spb = 60 / (seedBpm > 0 ? seedBpm : 120);
+  return Math.max(1, Math.round((t1 - t0) / spb));
+}
+
 /** El rango temporal (max - min timeSec) de un set de anclas no vacío. */
 function spanOf(anchors: Anchor[]): number {
   let min = Infinity;

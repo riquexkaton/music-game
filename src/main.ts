@@ -10,7 +10,8 @@ import { judgeCommit, judgeBarCommit, type BarResult } from "./core/play";
 import { SequenceTracker } from "./core/sequence";
 import { Calibrator } from "./core/calibration";
 import { GRADE_SCORE } from "./core/judge";
-import { AnchorCollector } from "./core/tempo";
+import { AnchorCollector, fitTwoAnchors, beatsBetweenTaps } from "./core/tempo";
+import { snapNearBar } from "./core/grid";
 import { type Rest, restAt, restEndBeat, sortRests } from "./core/rests";
 import { DIFFICULTIES, rampAt, type DifficultyPreset, type DifficultyName } from "./core/song";
 import { analyzeEnergy, intensityAt, type EnergyMap } from "./core/energy";
@@ -100,15 +101,18 @@ let syncIntent = false; // venimos del "🔒 SINCRONIZAR" del SONG SELECT: orien
 
 // --- editor NUEVO (#screen-editor, editor.ts) — estado de Fase 2 ---
 // El editor reusa el MISMO conductor para reproducir audio, pero NO el scheduler
-// (sin metrónomo) ni el runner del juego: es sólo audición. Como el Conductor no
-// expone seek arbitrario (arranca desde pausedAt), el "cabezal" del editor es:
-//   - durante PLAY: sigue conductor.time en vivo (audio real, fuente de verdad).
-//   - en PAUSA: un scrub VISUAL (edWaveTime) que se mueve al clic en la onda y
-//     alimenta monitor/beat/reloj, SIN saltar el audio (eso requeriría tocar core/).
+// (sin metrónomo) ni el runner del juego: es sólo audición. El Conductor expone
+// seek(seconds) (salto real del audio), así que el clic en la onda mueve el cabezal
+// Y el audio, sonando o en pausa. edWaveTime guarda la posición del cabezal en pausa
+// (en PLAY manda conductor.time en vivo). Eso permite saltar al final para marcar la
+// 2ª ancla del sync sin escuchar toda la canción.
 let editorWave: EditorWave | null = null;
 let edPlaying = false; // transport del editor activo (audio sonando para audición)
-let edSyncing = false; // sync-por-anclas en curso en el editor (ESPACIO = palmeo)
-let edSyncCollector: AnchorCollector | null = null;
+let edSyncing = false; // sync por 2 anclas lejanas en curso (ESPACIO = marcar ancla)
+let edAnchor0: number | null = null; // tiempo (s, ya descontada la latencia) de la 1ª marca
+let edAnchor1: number | null = null; // tiempo (s) de la 2ª marca (la lejana)
+let edAnchorBars = 0; // compases declarados entre marcas (semilla + ajuste ± del usuario)
+let edSeedBpm = 120; // BPM semilla capturado al empezar, para estimar el conteo de beats
 let edWaveTime = 0; // posición del cabezal del editor en segundos (scrub visual en pausa)
 let edMarking = false; // modo "marcar descanso" (clic-clic sobre la onda)
 let edPendingStartBeat: number | null = null; // inicio del descanso a medio marcar (en beats)
@@ -592,7 +596,11 @@ function beatToTime(beat: number): number {
 function firstCommitBeat(): number {
   const leadInBeat = gridBeat(conductor.beat + LEAD_IN_BEATS);
   const spb = chart.bpm > 0 ? 60 / chart.bpm : 0.5;
-  const gameStartBeat = gridBeat((currentGameStart - chart.offset) / spb);
+  // gameStart se guarda YA snappeado a downbeat (editorFixGameStart). Acá lo reconfirmamos
+  // al downbeat MÁS CERCANO con snapNearBar — NO con gridBeat (floor+1), que lo correría
+  // un compás entero hacia adelante. Así el primer ESPACIO cae EXACTO en el beat marcado.
+  // Sin gameStart fijado, currentGameStart=0 → beat ~0 → manda el lead-in (compat hacia atrás).
+  const gameStartBeat = snapNearBar((currentGameStart - chart.offset) / spb, BEATS_PER_BAR);
   return skipRests(Math.max(leadInBeat, gameStartBeat));
 }
 
@@ -1454,6 +1462,7 @@ editor = createEditor($("screen-editor"), {
   onSyncTap: () => editorSyncTap(),
   onSyncSave: () => editorSyncSave(),
   onSyncCancel: () => editorSyncCancel(),
+  onAnchorBarsStep: (delta) => editorAnchorBarsStep(delta),
   onFixStart: () => editorFixGameStart(),
   onOffsetStep: (deltaMs) => editorOffsetStep(deltaMs),
 
@@ -1529,7 +1538,9 @@ function editorStopPlayback(): void {
   }
   edPlaying = false;
   edSyncing = false;
-  edSyncCollector = null;
+  edAnchor0 = null;
+  edAnchor1 = null;
+  edAnchorBars = 0;
   editor?.setPlaying(false);
 }
 
@@ -1741,11 +1752,12 @@ function editorWaveClick(fraction: number): void {
     editorMarkAt(wave.beatForFraction(fraction));
     return;
   }
-  // scrub visual (sólo si no está sonando — sin seek de audio real).
-  if (!edPlaying) {
-    edWaveTime = fraction * currentBuffer.duration;
-    editorRefreshTransport();
-  }
+  // SEEK REAL: mueve el audio (y el cabezal) a donde clickeaste, sonando o en pausa.
+  // Así podés saltar al final a marcar la 2ª ancla sin escuchar toda la canción.
+  const target = fraction * currentBuffer.duration;
+  conductor.seek(target);
+  edWaveTime = target;
+  editorRefreshTransport();
 }
 
 // ---------------- panel 01: detección + BPM manual + tap-tempo ----------------
@@ -1822,9 +1834,28 @@ function editorApplyTap(): void {
   editorAfterTempoChange();
 }
 
-// ---------------- panel 02: sync-por-anclas + offset fino ----------------
+// ---------------- panel 02: sync por 2 ANCLAS LEJANAS + offset fino ----------------
+// La precisión del BPM la manda el SPAN (distancia entre marcas), no la cantidad de
+// palmeos: el error de pendiente escala ~1/span. Por eso con SÓLO 2 marcas bien
+// separadas (un downbeat temprano + otro tardío) la grilla queda tan exacta como
+// palmear toda la canción. El usuario declara/confirma cuántos compases hay entre
+// marcas (semilla por el BPM detectado), y fitTwoAnchors saca BPM + offset de la recta.
 
-/** Arranca el sync-por-anclas: audio sonando + AnchorCollector; ESPACIO = palmeo. */
+/** El BPM semilla actual (para estimar el conteo de beats entre marcas). */
+function edSyncSeed(): number {
+  return chart.bpm > 0 ? chart.bpm : 120;
+}
+
+/** Recalcula la grilla desde las 2 anclas + el conteo de compases y la aplica en vivo. */
+function editorAnchorRecompute(): void {
+  if (edAnchor0 === null || edAnchor1 === null) return;
+  const fit = fitTwoAnchors(edAnchor0, edAnchor1, edAnchorBars * BEATS_PER_BAR);
+  chart.bpm = fit.bpm;
+  chart.offset = fit.offset;
+  editorDrawWave(); // la grilla se reajusta en vivo al ajustar las marcas/compases
+}
+
+/** Arranca el sync por 2 anclas: audio desde 0; ESPACIO marca cada ancla. */
 async function editorSyncStart(): Promise<void> {
   if (!currentSong) {
     editor?.toast("NO HAY PISTA", "#ff3b30");
@@ -1837,80 +1868,130 @@ async function editorSyncStart(): Promise<void> {
     editor?.toast("NO PUDE CARGAR EL AUDIO", "#ff3b30");
     return;
   }
-  // arrancar audio desde 0 para palmear de punta a punta (frenar la fuente previa).
+  // arrancar audio desde 0 (frenar la fuente previa) para marcar de punta a punta.
   if (conductor.isRunning) conductor.pause();
   conductor.reset();
   edWaveTime = 0;
   conductor.start();
   edPlaying = true;
   edSyncing = true;
-  edSyncCollector = new AnchorCollector(chart.bpm > 0 ? chart.bpm : 120);
+  edAnchor0 = null;
+  edAnchor1 = null;
+  edAnchorBars = 0;
+  edSeedBpm = edSyncSeed(); // capturamos la semilla ANTES de tocar chart.bpm en vivo
   editor?.setPlaying(true);
   editorRenderSyncReadout();
   ensureEditorLoop();
-  editor?.toast("PALMEÁ ESPACIO EN CADA PULSO", "#c8ff1e");
+  editor?.toast("PALMEÁ ESPACIO EN UN '1' BIEN MARCADO", "#c8ff1e");
 }
 
-/** Un palmeo del sync (lo dispara ESPACIO). Igual que onSyncTap del editor viejo. */
+/** Un ESPACIO durante el sync: marca la 1ª ancla, luego la 2ª (la lejana). */
 function editorSyncTap(): void {
-  if (!edSyncCollector) return;
-  edSyncCollector.add(conductor.time - conductor.audioOffsetSec);
-  const fit = edSyncCollector.fit;
-  if (edSyncCollector.count >= 2) {
-    chart.bpm = fit.bpm;
-    chart.offset = fit.offset;
-    editorDrawWave(); // la grilla se reajusta en vivo mientras palmea
+  if (!edSyncing) return;
+  const t = conductor.time - conductor.audioOffsetSec;
+  if (edAnchor0 === null) {
+    edAnchor0 = t;
+    editorRenderSyncReadout();
+    editor?.toast("MARCA 1 ✓ — AHORA OTRA, LO MÁS LEJOS POSIBLE", "#25e0ff");
+    return;
   }
+  // 2ª marca (o re-marca): la más tardía es el ancla lejana. Estimamos el conteo de
+  // compases con la semilla; el usuario lo confirma/ajusta con el stepper.
+  const [early, late] = t >= edAnchor0 ? [edAnchor0, t] : [t, edAnchor0];
+  edAnchor0 = early;
+  edAnchor1 = late;
+  edAnchorBars = Math.max(1, Math.round(beatsBetweenTaps(early, late, edSeedBpm) / BEATS_PER_BAR));
+  editorAnchorRecompute();
   editorRenderSyncReadout();
 }
 
-/** Vuelca el TempoFit del collector a editor.setSyncReadout (BPM/offset/confianza). */
+/** Ajusta el conteo de compases entre marcas (± del usuario) y recalcula la grilla. */
+function editorAnchorBarsStep(delta: number): void {
+  if (edAnchor0 === null || edAnchor1 === null) return;
+  edAnchorBars = Math.max(1, edAnchorBars + delta);
+  editorAnchorRecompute();
+  editorRenderSyncReadout();
+}
+
+/** Vuelca el estado del sync por anclas a la UI (readout + stepper de compases). */
 function editorRenderSyncReadout(): void {
   if (!editor) return;
-  const c = edSyncCollector;
-  if (!c || c.count < 2) {
+  if (!edSyncing) {
     editor.setSyncReadout({
-      bpm: "—",
-      offset: "—",
-      confidence: "marcá 3+ pulsos",
-      count: c ? `${c.count} marcas` : "—",
-      active: edSyncing,
+      bpm: "—", offset: "—",
+      confidence: "marcá 2 downbeats lejanos",
+      count: "—", active: false, canSave: false,
     });
+    editor.setAnchorBars("—", false);
     return;
   }
-  const fit = c.fit;
+  if (edAnchor0 === null) {
+    editor.setSyncReadout({
+      bpm: "—", offset: "—",
+      confidence: "palmeá ESPACIO en un '1' marcado",
+      count: "0 / 2 marcas", active: true, canSave: false,
+    });
+    editor.setAnchorBars("—", false);
+    return;
+  }
+  if (edAnchor1 === null) {
+    editor.setSyncReadout({
+      bpm: "—", offset: "—",
+      confidence: "ahora otra marca, LO MÁS LEJOS posible",
+      count: "1 / 2 marcas", active: true, canSave: false,
+    });
+    editor.setAnchorBars("—", false);
+    return;
+  }
+  const fit = fitTwoAnchors(edAnchor0, edAnchor1, edAnchorBars * BEATS_PER_BAR);
+  const span = Math.abs(edAnchor1 - edAnchor0);
   editor.setSyncReadout({
     bpm: fit.bpm.toFixed(1),
     offset: formatMs(fit.offset),
-    confidence:
-      fit.rSquared !== null && fit.residualMs !== null
-        ? `r² ${fit.rSquared.toFixed(3)} · ±${Math.round(fit.residualMs)} ms`
-        : "marcá 3+ pulsos",
-    count: `${fit.anchorCount} marcas · ${fit.spanSec.toFixed(0)} s`,
-    active: edSyncing,
+    confidence: `span ${span.toFixed(0)} s · cuanto más lejos, más preciso`,
+    count: "2 / 2 marcas ✓",
+    active: true,
+    canSave: true,
   });
+  editor.setAnchorBars(String(edAnchorBars), true);
 }
 
-/** Guarda el fit del sync (tempoSource:'manual') y refresca todo. */
+/** Guarda la grilla de las 2 anclas (tempoSource:'manual') y refresca todo. */
 function editorSyncSave(): void {
-  if (!currentSong || !edSyncCollector || edSyncCollector.count < 2) {
-    editor?.toast("PALMEÁ MÁS PULSOS", "#ff3b30");
+  if (!currentSong || edAnchor0 === null || edAnchor1 === null) {
+    editor?.toast("MARCÁ LAS 2 ANCLAS PRIMERO", "#ff3b30");
     return;
   }
-  const fit = edSyncCollector.fit;
+  const fit = fitTwoAnchors(edAnchor0, edAnchor1, edAnchorBars * BEATS_PER_BAR);
+  const bars = edAnchorBars; // capturar antes de que editorStopPlayback resetee el estado
   persistSong(currentSong, { bpm: fit.bpm, offset: fit.offset, tempoSource: "manual" });
   chart.bpm = fit.bpm;
   chart.offset = fit.offset;
   editorStopPlayback();
   edWaveTime = 0;
   editorAfterTempoChange();
-  editor?.setSyncReadout({ bpm: fit.bpm.toFixed(1), offset: formatMs(fit.offset), confidence: "✓ guardado", count: `${fit.anchorCount} marcas`, active: false });
+  editor?.setSyncReadout({
+    bpm: fit.bpm.toFixed(1),
+    offset: formatMs(fit.offset),
+    confidence: "✓ guardado",
+    count: `${bars} compases`,
+    active: false,
+    canSave: false,
+  });
+  editor?.setAnchorBars(String(bars), false);
   editor?.toast("SYNC GUARDADO ✓", "#c8ff1e");
 }
 
-/** Cancela el sync en curso (descarta el collector). */
+/** Cancela el sync en curso y restaura la grilla guardada (el sync en vivo la modificó). */
 function editorSyncCancel(): void {
   editorStopPlayback();
+  if (currentSong) {
+    const saved = loadConfig(currentSong.id) ?? currentSong;
+    const t = songTempo(saved);
+    chart.bpm = t?.bpm ?? 120;
+    chart.offset = t?.offset ?? 0;
+  }
+  editorAfterTempoChange();
   editorRenderSyncReadout();
   editor?.toast("SYNC CANCELADO", "#ff3b30");
 }
@@ -1926,7 +2007,12 @@ function editorFixGameStart(): void {
     editor?.toast("NO HAY PISTA", "#ff3b30");
     return;
   }
-  const sec = Math.round(editorCurrentTime() * 1000) / 1000;
+  // Snappeamos el cabezal al downbeat MÁS CERCANO de la grilla ANTES de validar/guardar:
+  // así lo que se persiste (y se ve en la onda) es EXACTAMENTE el beat donde caerá el
+  // primer ESPACIO al jugar (firstCommitBeat usa el mismo snapNearBar → es idempotente).
+  const spb = chart.bpm > 0 ? 60 / chart.bpm : 0.5;
+  const snappedBeat = snapNearBar((editorCurrentTime() - chart.offset) / spb, BEATS_PER_BAR);
+  const sec = Math.round((chart.offset + snappedBeat * spb) * 1000) / 1000;
   const dur = currentBuffer.duration;
   if (sec >= dur - 1) {
     editor?.toast("EL INICIO ESTÁ DEMASIADO AL FINAL", "#ff3b30");
@@ -1934,7 +2020,6 @@ function editorFixGameStart(): void {
   }
   // El inicio tiene que ir ANTES del primer descanso: si cae sobre/después del
   // arranque de algún descanso, choca. (rests en beats → segundos por la grilla.)
-  const spb = chart.bpm > 0 ? 60 / chart.bpm : 0.5;
   if (editingRests.some((r) => sec >= chart.offset + r.atBeat * spb)) {
     editor?.toast("EL INICIO CHOCA CON UN DESCANSO", "#ff3b30");
     return;

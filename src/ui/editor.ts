@@ -75,18 +75,20 @@ export interface EditorStatus {
   color: string;
 }
 
-/** Lectura del panel 02 Sync (sync-por-anclas). main.ts la alimenta desde TempoFit. */
+/** Lectura del panel 02 Sync (sync por 2 anclas). main.ts la alimenta desde TempoFit. */
 export interface SyncReadout {
   /** BPM ajustado, o "—". */
   bpm: string;
   /** Offset "+N ms", o "—". */
   offset: string;
-  /** Confianza "r² … · ±N ms", o instrucción. */
+  /** Estado/instrucción del flujo de marcado. */
   confidence: string;
-  /** "N marcas · Ss", o "—". */
+  /** "N / 2 marcas", o "—". */
   count: string;
-  /** ¿Hay un sync en curso? (activa el bloque y habilita guardar/cancelar). */
+  /** ¿Hay un sync en curso? (activa el bloque y habilita cancelar; deshabilita empezar). */
   active: boolean;
+  /** ¿Se puede guardar ya? (las 2 anclas marcadas). Si se omite, cae a `active`. */
+  canSave?: boolean;
 }
 
 /** Una fila de la lista de descansos (panel 03). */
@@ -135,15 +137,17 @@ export interface EditorHooks {
   /** 🔜 APLICAR el BPM del tap-tempo. */
   onApplyTap: () => void;
 
-  // ---- panel 02 Sync (🔜 Fase 2: AnchorCollector palmeando ESPACIO) ----
-  /** 🔜 Iniciar el sync-por-anclas (arranca audio + collector). */
+  // ---- panel 02 Sync (sync por 2 anclas lejanas: 2 downbeats con ESPACIO) ----
+  /** Iniciar el sync por 2 anclas (arranca audio desde 0). */
   onSyncStart: () => void;
-  /** 🔜 Un palmeo del sync (cada pulso). Normalmente lo dispara ESPACIO. */
+  /** Una marca del sync (un downbeat). Normalmente lo dispara ESPACIO. */
   onSyncTap: () => void;
-  /** 🔜 Guardar el fit del sync (tempoSource:'manual'). */
+  /** Guardar la grilla de las 2 anclas (tempoSource:'manual'). */
   onSyncSave: () => void;
-  /** 🔜 Cancelar el sync en curso. */
+  /** Cancelar el sync en curso. */
   onSyncCancel: () => void;
+  /** Ajustar el conteo de compases entre las 2 marcas (±1). */
+  onAnchorBarsStep: (delta: number) => void;
   /** Fijar el INICIO DEL JUEGO en el cabezal (▶ ARRANCAR EN EL CABEZAL). */
   onFixStart: () => void;
   /** 🔜 Offset fino ± (delta en ms: ±5 / ±1). */
@@ -183,8 +187,10 @@ export interface EditorApi {
   setBpm: (bpm: string) => void;
   /** Status pill del header (FALTA SYNC / LISTA / …). */
   setStatus: (status: EditorStatus) => void;
-  /** Displays del panel 02 Sync (BPM/offset/confianza/marcas). */
+  /** Displays del panel 02 Sync (BPM/offset/estado/marcas). */
   setSyncReadout: (readout: SyncReadout) => void;
+  /** Stepper "compases entre marcas" del sync por 2 anclas (valor + activo). */
+  setAnchorBars: (label: string, active: boolean) => void;
   /** Texto del readout del tap-tempo + estado del botón APLICAR (panel 01). */
   setTapReadout: (text: string, canApply: boolean, applyLabel?: string) => void;
   /** Etiqueta + color del INICIO DEL JUEGO (panel 02): "m:ss.d s" rosa / "sin definir". */
@@ -339,22 +345,30 @@ export function createEditor(root: HTMLElement, hooks: EditorHooks): EditorApi {
                   <span class="ple-panel-title">Sync</span>
                 </div>
 
-                <!-- bloque SYNC POR ANCLAS (palmear ESPACIO de punta a punta) -->
-                <div class="ple-field-label ple-mb9">SYNC POR ANCLAS — PALMEÁ ESPACIO</div>
+                <!-- bloque SYNC POR 2 ANCLAS (marcar 2 downbeats lejanos con ESPACIO) -->
+                <div class="ple-field-label ple-mb9">SYNC POR 2 ANCLAS — MARCÁ 2 DOWNBEATS</div>
                 <div class="ple-sync-block" id="ple-sync-block">
                   <div class="ple-sync-readout">
                     <div class="ple-sync-row">BPM <b id="ple-sync-bpm">—</b></div>
                     <div class="ple-sync-row">OFFSET <b id="ple-sync-offset">—</b></div>
-                    <div class="ple-sync-row">CONFIANZA <b id="ple-sync-conf">marcá 3+ pulsos</b></div>
+                    <div class="ple-sync-row">ESTADO <b id="ple-sync-conf">marcá 2 downbeats lejanos</b></div>
                     <div class="ple-sync-row ple-sync-count" id="ple-sync-count">—</div>
                   </div>
+                  <div class="ple-anchor-bars" id="ple-anchor-bars">
+                    <span class="ple-field-label">COMPASES ENTRE MARCAS</span>
+                    <div class="ple-stepper">
+                      <button type="button" class="ple-step-btn" id="ple-bars-down" disabled>−</button>
+                      <div class="ple-step-val"><span id="ple-bars-val">—</span></div>
+                      <button type="button" class="ple-step-btn" id="ple-bars-up" disabled>＋</button>
+                    </div>
+                  </div>
                   <div class="ple-sync-actions">
-                    <button type="button" class="ple-sync-start-btn" id="ple-sync-start">◉ EMPEZAR · PALMEAR</button>
+                    <button type="button" class="ple-sync-start-btn" id="ple-sync-start">◉ EMPEZAR · 2 MARCAS</button>
                     <button type="button" class="ple-sync-save-btn" id="ple-sync-save" disabled>✓ GUARDAR SYNC</button>
                     <button type="button" class="ple-sync-cancel-btn" id="ple-sync-cancel" disabled>CANCELAR</button>
                   </div>
                 </div>
-                <div class="ple-panel-note">Arrancá y palmeá <strong>ESPACIO</strong> en cada pulso, parejo, del principio al final. La grilla se ajusta sola.</div>
+                <div class="ple-panel-note">Marcá <strong>ESPACIO</strong> en el <strong>"1"</strong> de un compás al principio, y en otro <strong>"1"</strong> bien al final. Cuanto más lejos la 2ª marca, más preciso. Confirmá los compases y guardá.</div>
 
                 <!-- bloque INICIO DEL JUEGO (las flechas arrancan acá; el intro no exige input) -->
                 <div class="ple-field-label ple-mb9 ple-mt18">INICIO DEL JUEGO</div>
@@ -468,6 +482,10 @@ export function createEditor(root: HTMLElement, hooks: EditorHooks): EditorApi {
   const syncStartBtn = $("ple-sync-start") as HTMLButtonElement;
   const syncSaveBtn = $("ple-sync-save") as HTMLButtonElement;
   const syncCancelBtn = $("ple-sync-cancel") as HTMLButtonElement;
+  const anchorBarsRow = $("ple-anchor-bars");
+  const barsDownBtn = $("ple-bars-down") as HTMLButtonElement;
+  const barsUpBtn = $("ple-bars-up") as HTMLButtonElement;
+  const barsValEl = $("ple-bars-val");
   const startValEl = $("ple-start-val");
   const fixStartBtn = $("ple-fix-start") as HTMLButtonElement;
   const offsetValEl = $("ple-offset-val");
@@ -536,6 +554,8 @@ export function createEditor(root: HTMLElement, hooks: EditorHooks): EditorApi {
   syncStartBtn.addEventListener("click", () => hooks.onSyncStart());
   syncSaveBtn.addEventListener("click", () => hooks.onSyncSave());
   syncCancelBtn.addEventListener("click", () => hooks.onSyncCancel());
+  barsDownBtn.addEventListener("click", () => hooks.onAnchorBarsStep(-1));
+  barsUpBtn.addEventListener("click", () => hooks.onAnchorBarsStep(1));
   fixStartBtn.addEventListener("click", () => hooks.onFixStart());
   root.querySelectorAll<HTMLButtonElement>(".ple-off-btn").forEach((btn) => {
     btn.addEventListener("click", () => hooks.onOffsetStep(Number(btn.dataset.off)));
@@ -636,10 +656,19 @@ export function createEditor(root: HTMLElement, hooks: EditorHooks): EditorApi {
     syncOffsetEl.textContent = r.offset;
     syncConfEl.textContent = r.confidence;
     syncCountEl.textContent = r.count;
-    syncSaveBtn.disabled = !r.active;
+    // GUARDAR se habilita sólo con las 2 anclas (canSave); CANCELAR mientras haya sync.
+    syncSaveBtn.disabled = !(r.canSave ?? r.active);
     syncCancelBtn.disabled = !r.active;
     syncStartBtn.disabled = r.active;
     root.querySelector(".ple-sync-block")?.classList.toggle("active", r.active);
+  }
+
+  // Stepper "compases entre marcas" (sync por 2 anclas): valor + activo/inactivo.
+  function setAnchorBars(label: string, active: boolean): void {
+    barsValEl.textContent = label;
+    anchorBarsRow.classList.toggle("active", active);
+    barsDownBtn.disabled = !active;
+    barsUpBtn.disabled = !active;
   }
 
   // Readout del tap-tempo + estado del botón APLICAR. `applyLabel` permite a Fase 2
@@ -748,6 +777,7 @@ export function createEditor(root: HTMLElement, hooks: EditorHooks): EditorApi {
     setBpm,
     setStatus,
     setSyncReadout,
+    setAnchorBars,
     setTapReadout,
     setGameStart,
     setOffset,
