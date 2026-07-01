@@ -938,6 +938,11 @@ window.addEventListener("keydown", (e) => {
   // ESC durante el juego real (#screen-play) = "ESC · SALIR": volver (editor o SELECT).
   if (e.code === "Escape" && mode === "playing" && runnerView === "play") {
     e.preventDefault();
+    // Sin esto, el MISMO ESC sigue vivo y llega al handler de teclado del menú
+    // (menu.ts). Como leavePlay() ya nos dejó en SELECT, ese handler vería
+    // current==="select" y con ESC nos patearía a START. preventDefault NO frena
+    // otros listeners: hace falta cortar la propagación acá.
+    e.stopImmediatePropagation();
     leavePlay();
     return;
   }

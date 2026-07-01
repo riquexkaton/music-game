@@ -4,6 +4,7 @@
 
 import "./pulse.css";
 import type { SongConfig } from "../storage";
+import { createMenuMusic } from "./menu-music";
 
 const ACCENTS = ["#c8ff1e", "#25e0ff", "#ff2e9a", "#ffd021", "#a78bfa", "#ff7847"];
 const ARROW_GLYPHS = ["←", "↑", "→", "↓"];
@@ -70,6 +71,10 @@ export function initMenu(hooks: MenuHooks): MenuApi {
   let sel = 0;
   let lenis: LenisLike | null = null;
   let rafId = 0;
+
+  // Música de fondo de los menús: loop independiente del motor (ver menu-music.ts).
+  // La prende/apaga setScreen() según la pantalla activa.
+  const menuMusic = createMenuMusic("/menu/vamos-a-bailar.mp3");
 
   // ---------- helpers de datos (siempre reales) ----------
   const songs = (): SongConfig[] => hooks.getSongs();
@@ -339,6 +344,11 @@ export function initMenu(hooks: MenuHooks): MenuApi {
   // ---------- router ----------
   function setScreen(s: Screen): void {
     current = s;
+    // Música de menú: suena en START / SELECT / RESULT; se calla en el gameplay
+    // (play → suena la canción del juego) y en el editor/streamers (game → se
+    // audiciona la pista que se está editando). Un solo punto para todo el routing.
+    if (s === "play" || s === "game") menuMusic.leave();
+    else menuMusic.enter();
     startScreen.classList.toggle("hidden", s !== "start");
     selectScreen.classList.toggle("hidden", s !== "select");
     gameScreen.classList.toggle("hidden", s !== "game");
