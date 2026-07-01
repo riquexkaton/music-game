@@ -31,7 +31,16 @@ import { initMenu } from "./ui/menu";
 import { createGame, type ArrowCellState, type GameApi, type GameHooks } from "./ui/game";
 import { createGameAlt2 } from "./ui/game-alt2";
 import { createConfig } from "./ui/config";
+import { createStreamers, type StreamerCard } from "./ui/streamers";
 import { loadSkin, saveSkin, type GameSkin } from "./settings";
+import {
+  listStreamers,
+  resolveImages,
+  loadActiveId,
+  saveActiveId,
+  createStreamer,
+  deleteStreamer,
+} from "./streamers";
 import { createResult } from "./ui/result";
 import {
   createEditor,
@@ -556,6 +565,7 @@ async function play(view: RunnerView = "play"): Promise<void> {
       difficulty: DIFFICULTIES[song.difficulty].label,
       accent: currentAccent,
     });
+    game.setStreamer(await currentStreamerInfo()); // avatar ACTIVO (Pulse Streamers)
     game.setMuted(conductor.isMuted);
     game.start();
   }
@@ -1421,6 +1431,8 @@ const menu = initMenu({
   },
   // ⚙ CONFIG desde el START: abre el panel de configuración (elegir skin).
   onConfig: () => config.open(),
+  // 👥 STREAMERS desde el START: abre el gestor de avatares.
+  onStreamers: () => showStreamers(),
 });
 
 // Vista de juego real (#screen-play). Hay DOS pieles que cumplen el MISMO contrato
@@ -1460,6 +1472,78 @@ const config = createConfig({
     mountGame(skin);
   },
 });
+
+// ---------------- STREAMERS (avatares del juego) ----------------
+// El streamer ACTIVO (Miku de fábrica, o uno creado por el usuario) reemplaza al
+// personaje en el gameplay: main lo resuelve (imágenes + handle + inicial) y lo aplica
+// con game.setStreamer() al arrancar cada partida. Las dos skins lo respetan.
+const streamersScreen = $("screen-streamers");
+let streamerRoster: StreamerCard[] = [];
+
+/** Resuelve el streamer activo con sus URLs de imagen (para game.setStreamer). */
+async function currentStreamerInfo(): Promise<{
+  name: string;
+  handle: string;
+  initial: string;
+  images: { idle: string; hit: string; miss: string };
+}> {
+  const id = loadActiveId();
+  const s = listStreamers().find((x) => x.id === id) ?? listStreamers()[0]!;
+  const images = await resolveImages(s.id);
+  return { name: s.name, handle: s.handle, initial: s.name.slice(0, 1), images };
+}
+
+/** Re-resuelve todo el roster (con URLs de imagen) y re-renderiza la vista. */
+async function refreshStreamers(): Promise<void> {
+  const list = listStreamers();
+  streamerRoster = await Promise.all(
+    list.map(async (s) => ({
+      id: s.id,
+      name: s.name,
+      handle: s.handle,
+      bio: s.bio,
+      accent: s.accent,
+      removable: s.source === "custom",
+      images: await resolveImages(s.id),
+    })),
+  );
+  streamers.render();
+}
+
+const streamers = createStreamers(streamersScreen, {
+  getRoster: () => streamerRoster,
+  getActiveId: () => loadActiveId(),
+  onUse: (id) => {
+    saveActiveId(id);
+    void refreshStreamers(); // refresca el badge "EN USO"
+  },
+  onDelete: (id) => {
+    void deleteStreamer(id).then(refreshStreamers);
+  },
+  onCreate: async (data) => {
+    try {
+      const id = await createStreamer(data);
+      await refreshStreamers();
+      return id;
+    } catch {
+      return null;
+    }
+  },
+  onBack: () => {
+    streamersScreen.classList.add("hidden");
+    menu.showStart();
+  },
+});
+
+/** Muestra #screen-streamers: apaga el resto de pantallas y refresca el roster. */
+function showStreamers(): void {
+  if (mode !== "idle") stopPlayback();
+  menu.showGame(); // apaga las 5 pantallas del menú
+  $("screen-game").classList.add("hidden");
+  editorScreen.classList.add("hidden");
+  streamersScreen.classList.remove("hidden");
+  void refreshStreamers();
+}
 
 // Vista nueva del EDITOR (#screen-editor): se instancia acá (ya existe `menu`).
 // FASE 1 cablea los hooks SIMPLES; los demás son TODO de Fase 2 (ver comentarios).

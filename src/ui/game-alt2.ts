@@ -10,7 +10,7 @@
 // nodos. La fuente de verdad sigue siendo el conductor real; esto es sólo PIEL.
 
 import { createCharacter, type CharacterApi } from "./character";
-import { createWaves, type WavesApi } from "./waves";
+import { createHalftone, type HalftoneApi } from "./halftone";
 import { createFx, type FxApi } from "./fx";
 import { createStream, type StreamApi } from "./stream";
 import { TIMING_WINDOWS, type Grade } from "../core/judge";
@@ -18,6 +18,7 @@ import type {
   GameApi,
   GameHooks,
   GameSongInfo,
+  StreamerInfo,
   ArrowCellState,
   TimingPhase,
 } from "./game";
@@ -87,17 +88,19 @@ export function createGameAlt2(root: HTMLElement, hooks: GameHooks): GameApi {
     <div class="pl-a2-progress"><div id="a2-progress"></div></div>
 
     <div class="pl-a2-field" id="a2-field">
-      <canvas class="pl-wave-canvas" id="a2-wave"></canvas>
-      <div class="pl-bg-grid" id="a2-grid"></div>
+      <canvas class="pl-a2-bg" id="a2-bg"></canvas>
       <div class="pl-a2-vignette"></div>
       <div class="pl-a2-edge"><span></span><span></span></div>
 
       <div class="pl-flash" id="a2-flash"></div>
-      <div class="pl-speed" id="a2-speed"></div>
       <canvas class="pl-fx-canvas" id="a2-fx"></canvas>
       <div class="pl-emote-layer" id="a2-emote"></div>
       <div class="pl-alert-layer" id="a2-alert"></div>
       <div class="pl-combo-flair" id="a2-flair"></div>
+      <!-- cuenta regresiva del intro: CENTRADA sobre el campo (no en la columna HUD) -->
+      <div class="pl-countdown" id="a2-countdown" hidden>
+        <div class="pl-countdown-num" id="a2-countdown-num"></div>
+      </div>
 
       <!-- hype rail (arriba, horizontal) -->
       <div class="pl-a2-hype-rail"><div class="pl-a2-hype-fill" id="a2-hype"></div></div>
@@ -142,9 +145,6 @@ export function createGameAlt2(root: HTMLElement, hooks: GameHooks): GameApi {
         <div class="pl-a2-center">
           <div class="pl-judg" id="a2-judg">
             <div class="pl-judg-idle" id="a2-idle">PREPARADO</div>
-            <div class="pl-countdown" id="a2-countdown" hidden>
-              <div class="pl-countdown-num" id="a2-countdown-num"></div>
-            </div>
             <div class="pl-break" id="a2-break" hidden>
               <div class="pl-break-eyebrow">DESCANSO</div>
               <div class="pl-break-count">
@@ -185,9 +185,12 @@ export function createGameAlt2(root: HTMLElement, hooks: GameHooks): GameApi {
   const fieldEl = $("a2-field");
   const flashEl = $("a2-flash");
   const fxCanvas = $("a2-fx") as HTMLCanvasElement;
-  const waveCanvas = $("a2-wave") as HTMLCanvasElement;
-  const gridEl = $("a2-grid");
-  const speedEl = $("a2-speed");
+  const bgCanvas = $("a2-bg") as HTMLCanvasElement;
+  // grid + speed-lines son del look del hub CLÁSICO; Alt 2 usa el fondo halftone.
+  // stream igual pide esos refs (les anima la opacity), así que le pasamos divs
+  // sueltos NO montados: su loop no rompe y no se ve nada del look clásico.
+  const gridEl = document.createElement("div");
+  const speedEl = document.createElement("div");
   const emoteLayerEl = $("a2-emote");
   const alertLayerEl = $("a2-alert");
   const comboFlairEl = $("a2-flair");
@@ -219,7 +222,7 @@ export function createGameAlt2(root: HTMLElement, hooks: GameHooks): GameApi {
 
   // ---------------- módulos (reutilizados, mismas interfaces que game.ts) ----------------
   const character: CharacterApi = createCharacter(camStackEl);
-  const waves: WavesApi = createWaves(waveCanvas, hooks.getFreq, hooks.getBpm);
+  const bg: HalftoneApi = createHalftone(bgCanvas, hooks.getFreq, hooks.getBpm);
   const fx: FxApi = createFx(fxCanvas, flashEl, fieldEl);
   // El rail de HYPE de Alt 2 es HORIZONTAL → hypeAxis:"width" (el clásico usa height).
   const stream: StreamApi = createStream(
@@ -250,7 +253,7 @@ export function createGameAlt2(root: HTMLElement, hooks: GameHooks): GameApi {
     camGlowEl.style.background = `radial-gradient(70% 60% at 64% 36%, ${hex}4d 0%, transparent 64%)`;
     // El MEJOR queda en lima fija (como el diseño); combo/acento sí siguen la canción.
     character.setAccent(hex);
-    waves.setAccent(hex);
+    bg.setAccent(hex);
     stream.setAccent(hex);
   }
 
@@ -446,6 +449,14 @@ export function createGameAlt2(root: HTMLElement, hooks: GameHooks): GameApi {
     character.setExpression(e);
   }
 
+  // ---------------- streamer activo (avatar) ----------------
+  const camNameEl = root.querySelector<HTMLElement>(".pl-a2-cam-name");
+  function setStreamer(info: StreamerInfo): void {
+    chipEl.textContent = info.initial;
+    if (camNameEl) camNameEl.textContent = info.handle;
+    character.setImages(info.images);
+  }
+
   function applyTimingGeometry(bpm: number): void {
     const g = timingGeometry(bpm > 0 ? bpm : 120);
     timingGood.style.cssText = `left:${g.good.left}%;width:${g.good.width}%;`;
@@ -480,6 +491,7 @@ export function createGameAlt2(root: HTMLElement, hooks: GameHooks): GameApi {
 
   return {
     setSong,
+    setStreamer,
     renderSequence,
     renderTiming,
     showJudgment,
@@ -495,11 +507,11 @@ export function createGameAlt2(root: HTMLElement, hooks: GameHooks): GameApi {
     setMuted,
     start: () => {
       fx.resize();
-      waves.start();
+      bg.start();
       stream.start();
     },
     stop: () => {
-      waves.stop();
+      bg.stop();
       stream.stop();
     },
   };

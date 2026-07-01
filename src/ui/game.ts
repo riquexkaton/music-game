@@ -77,6 +77,16 @@ export interface GameSongInfo {
   accent: string;
 }
 
+/** El streamer ACTIVO (avatar del juego) que se muestra en la cámara/personaje. Lo
+ *  aplica main.ts al arrancar la partida, con el elegido en la vista Pulse Streamers. */
+export interface StreamerInfo {
+  name: string;
+  handle: string;
+  /** Inicial para el chip (1 letra). */
+  initial: string;
+  images: { idle: string; hit: string; miss: string };
+}
+
 /** Hooks que el motor (main.ts) enchufa a los controles de la vista. */
 export interface GameHooks {
   /** El usuario tocó MUTE; recibe el nuevo estado deseado. Devuelve el estado real aplicado. */
@@ -93,6 +103,8 @@ export interface GameHooks {
 export interface GameApi {
   /** Configura la song bar + acento de la canción (al arrancar play()). */
   setSong(info: GameSongInfo): void;
+  /** Aplica el streamer ACTIVO (avatar): imágenes idle/hit/miss + handle + inicial. */
+  setStreamer(info: StreamerInfo): void;
   /** Pinta la secuencia de flechas. `null` = sin barra activa (limpia). */
   renderSequence(states: ArrowCellState[] | null, glyphs: string[]): void;
   /**
@@ -638,6 +650,14 @@ export function createGame(root: HTMLElement, hooks: GameHooks): GameApi {
     character.setExpression(e);
   }
 
+  // ---------------- streamer activo (avatar) ----------------
+  const charHandleEl = charPanel.querySelector<HTMLElement>(".pl-char-handle");
+  function setStreamer(info: StreamerInfo): void {
+    charChip.textContent = info.initial;
+    if (charHandleEl) charHandleEl.textContent = info.handle;
+    character.setImages(info.images);
+  }
+
   // Posiciona las zonas good/perfect de la barra según el BPM real (ventanas del
   // motor → %). Se llama al arrancar cada canción porque las ventanas están en
   // segundos y su ancho en % depende del BPM.
@@ -682,6 +702,7 @@ export function createGame(root: HTMLElement, hooks: GameHooks): GameApi {
 
   return {
     setSong,
+    setStreamer,
     renderSequence,
     renderTiming,
     showJudgment,

@@ -14,6 +14,12 @@
 export interface CharacterApi {
   setExpression(e: "idle" | "hit" | "miss"): void;
   setAccent(hex: string): void;
+  /**
+   * Cambia las 3 imágenes (idle/hit/miss) al streamer ACTIVO. Antes estaban fijas en
+   * Miku; ahora main.ts las setea con el streamer elegido en la vista Pulse Streamers.
+   * URLs vacías se ignoran (mantienen la imagen previa).
+   */
+  setImages(images: { idle: string; hit: string; miss: string }): void;
 }
 
 const EXPRESSIONS = ["idle", "hit", "miss"] as const;
@@ -70,5 +76,15 @@ export function createCharacter(container: HTMLElement): CharacterApi {
     applyLocalGlow();
   }
 
-  return { setExpression, setAccent };
+  function setImages(images: { idle: string; hit: string; miss: string }): void {
+    for (const e of EXPRESSIONS) {
+      const url = images[e];
+      if (!url) continue; // URL vacía → conservar la imagen previa
+      // Si un error anterior la ocultó (display:none), re-mostrarla antes de recargar.
+      imgs[e].style.display = "";
+      imgs[e].src = url;
+    }
+  }
+
+  return { setExpression, setAccent, setImages };
 }

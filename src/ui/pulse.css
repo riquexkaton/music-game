@@ -1815,6 +1815,18 @@ body {
 .pl-a2-edge span { position: absolute; left: 0; right: 0; height: 4px; background: var(--accent); box-shadow: 0 0 16px var(--accent); }
 .pl-a2-edge span:first-child { top: 0; }
 .pl-a2-edge span:last-child { bottom: 0; }
+/* fondo halftone "console screen" (lo dibuja halftone.ts) — reemplaza a los anillos
+   de sonar + grilla en perspectiva del hub clásico. */
+.pl-a2-bg { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; display: block; }
+
+/* cuenta regresiva del intro (3·2·1·¡VAMOS!): en Alt 2 es hija directa del campo y va
+   CENTRADA (en el hub clásico vive en el slot del judgment). Antes quedaba pegada al
+   borde izquierdo porque colgaba de la columna HUD. */
+.pl-a2 .pl-countdown {
+  top: 44%; bottom: auto; left: 50%;
+  transform: translate(-50%, -50%);
+  align-items: center; height: auto; z-index: 11;
+}
 
 /* chat reubicado (reusa .pl-chat-layer/.pl-chat-row globales) */
 .pl-a2-chat { left: 44px; bottom: 22px; width: min(38%, 440px); max-height: 26%; z-index: 6; }
@@ -1861,3 +1873,155 @@ body {
 .pl-a2-center .pl-arrows-row { justify-content: flex-start; }
 .pl-a2-center .pl-timing { width: 100%; max-width: 560px; }
 .pl-a2-center .pl-score { justify-content: flex-start; }
+/* teclas: fondo SÓLIDO para que no se pierdan sobre el halftone denso del Alt 2 (en el
+   hub clásico van transparentes sobre fondo oscuro). Sólo pending/current — las done
+   (acento) y wrong (rojo) ya tienen fondo sólido y se despegan solas. */
+.pl-a2 .pl-keycap-pending {
+  background: rgba(11, 11, 12, 0.85);
+  border-color: #3f3f48;
+  color: #8a8a96;
+  box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.5);
+}
+.pl-a2 .pl-keycap-current {
+  background: rgba(11, 11, 12, 0.78);
+  box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.5);
+}
+
+/* ============================================================================
+   PULSE STREAMERS (#screen-streamers) — gestor de avatares (crear / elegir).
+   Portado de claude.ai/design "Pulse Streamers". Brutalist: bordes 2px, radius 0.
+   ============================================================================ */
+/* link 👥 STREAMERS en el START (arriba del ⚙ CONFIG, esquina inferior izquierda) */
+.pl-streamers-link {
+  position: absolute; bottom: 62px; left: 28px; z-index: 5;
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em;
+  color: var(--paper-dim); background: transparent;
+  border: 1.5px solid var(--line); padding: 7px 12px; cursor: pointer;
+  transition: color 0.18s ease, border-color 0.18s ease;
+}
+.pl-streamers-link:hover { color: var(--magenta); border-color: var(--magenta); }
+
+#screen-streamers.ps-shell { background: var(--ink); overflow: hidden; }
+.ps-scrollbar::-webkit-scrollbar { width: 10px; height: 10px; }
+.ps-scrollbar::-webkit-scrollbar-track { background: var(--ink); }
+.ps-scrollbar::-webkit-scrollbar-thumb { background: var(--line); border: 2px solid var(--ink); }
+.ps-scrollbar::-webkit-scrollbar-thumb:hover { background: #3f3f48; }
+
+/* header + tabs */
+.ps-header { flex: none; display: flex; align-items: stretch; border-bottom: 2px solid var(--line); background: var(--ink); }
+.ps-logo { padding: 14px 22px; border-right: 2px solid var(--line); display: flex; align-items: center; font-family: var(--font-display); font-size: 22px; letter-spacing: -0.03em; text-transform: uppercase; line-height: 1; }
+.ps-logo span { color: var(--lime); }
+.ps-tab { padding: 14px 22px; border: 0; border-right: 2px solid var(--line); cursor: pointer; font-family: var(--font-display); font-size: 14px; letter-spacing: 0.03em; text-transform: uppercase; background: transparent; color: var(--ghost); transition: background 0.12s, color 0.12s; }
+.ps-tab:hover { color: var(--paper); background: var(--surface); }
+.ps-tab.on { background: var(--lime); color: var(--ink); }
+.ps-header .ps-grow { flex: 1; }
+.ps-count { display: flex; align-items: center; gap: 10px; padding: 14px 22px; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.12em; color: var(--ghost-2); text-transform: uppercase; }
+.ps-count-dot { width: 9px; height: 9px; background: var(--magenta); display: inline-block; }
+.ps-back { padding: 14px 22px; border: 0; border-left: 2px solid var(--line); background: transparent; color: var(--ghost); cursor: pointer; font-family: var(--font-mono); font-weight: 700; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; transition: color 0.12s, background 0.12s; }
+.ps-back:hover { color: var(--magenta); background: var(--surface); }
+
+.ps-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+/* ---------- ELEGIR ---------- */
+.ps-elegir { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.ps-grid-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 26px 30px 30px; }
+.ps-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(284px, 1fr)); gap: 18px; align-items: stretch; }
+
+.ps-card { display: flex; flex-direction: column; overflow: hidden; cursor: pointer; background: var(--surface-2); border: 2px solid var(--line-soft); transition: border-color 0.12s, box-shadow 0.12s, transform 0.12s; animation: pl-card-in 0.4s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.ps-card.on { border-width: 3px; box-shadow: 8px 8px 0 #000; transform: translate(-2px, -2px); }
+.ps-card-portrait { position: relative; width: 100%; aspect-ratio: 3/4; overflow: hidden; background: var(--ink); }
+.ps-card-glow { position: absolute; inset: 0; z-index: 0; }
+.ps-scan { position: absolute; inset: 0; z-index: 0; pointer-events: none; background: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.018) 0 2px, transparent 2px 9px); }
+.ps-card-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center top; z-index: 1; }
+.ps-card-shade { position: absolute; inset: 0; z-index: 2; pointer-events: none; background: linear-gradient(180deg, rgba(7, 7, 8, 0.5) 0%, rgba(7, 7, 8, 0.02) 26%, transparent 56%, rgba(7, 7, 8, 0.82) 100%); }
+.ps-card-live { position: absolute; top: 11px; left: 11px; z-index: 4; display: flex; align-items: center; gap: 6px; background: #e0245e; padding: 4px 9px 4px 8px; box-shadow: 2px 2px 0 #000; font-family: var(--font-mono); font-weight: 700; font-size: 10px; letter-spacing: 0.18em; color: #fff; }
+.ps-live-dot { width: 8px; height: 8px; border-radius: 50%; background: #fff; display: inline-block; animation: pl-beat-core 1.1s ease-in-out infinite; }
+.ps-card-tag { position: absolute; top: 11px; right: 11px; z-index: 4; font-family: var(--font-mono); font-weight: 700; font-size: 10px; letter-spacing: 0.14em; padding: 4px 9px; background: rgba(7, 7, 8, 0.78); border: 1.5px solid var(--paper-dim); }
+.ps-card.on .ps-card-tag { top: 42px; }
+.ps-card-inuse { position: absolute; top: 11px; left: 11px; margin-top: 26px; z-index: 4; font-family: var(--font-mono); font-weight: 700; font-size: 9px; letter-spacing: 0.14em; padding: 3px 7px; background: var(--lime); color: var(--ink); box-shadow: 2px 2px 0 #000; }
+.ps-card-del { position: absolute; bottom: 11px; right: 11px; z-index: 6; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border: 1.5px solid var(--line); background: rgba(7, 7, 8, 0.72); color: var(--ghost-2); cursor: pointer; font-size: 11px; transition: all 0.1s; }
+.ps-card-del:hover { border-color: var(--red); color: var(--ink); background: var(--red); }
+.ps-card-lower { position: absolute; left: 0; right: 0; bottom: 0; z-index: 4; padding: 11px 13px; display: flex; flex-direction: column; gap: 3px; pointer-events: none; }
+.ps-card-id { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.ps-card-chip { width: 18px; height: 18px; flex: none; display: flex; align-items: center; justify-content: center; font-family: var(--font-display); font-size: 11px; color: var(--ink); box-shadow: 1.5px 1.5px 0 #000; }
+.ps-card-name { font-family: var(--font-display); font-size: 17px; letter-spacing: -0.02em; color: var(--paper); text-shadow: 2px 2px 0 #000; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ps-card-handle { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em; color: var(--paper-dim); text-shadow: 1px 1px 0 #000; }
+.ps-portrait-state { font-family: var(--font-display); font-size: 15px; letter-spacing: -0.01em; text-transform: uppercase; text-shadow: 2px 2px 0 #000; margin-top: 2px; }
+.ps-card-meter { position: absolute; right: 13px; bottom: 13px; z-index: 4; display: flex; align-items: flex-end; gap: 3px; height: 22px; pointer-events: none; }
+.ps-card-meter span { width: 3px; transform-origin: bottom; background: var(--paper-dim); }
+.ps-card-meter span:nth-child(1) { height: 45%; animation: pl-audio-bar 0.5s ease-in-out infinite; }
+.ps-card-meter span:nth-child(2) { height: 80%; animation: pl-audio-bar 0.5s ease-in-out infinite 0.12s; }
+.ps-card-meter span:nth-child(3) { height: 100%; animation: pl-audio-bar 0.42s ease-in-out infinite 0.24s; }
+.ps-card-meter span:nth-child(4) { height: 60%; animation: pl-audio-bar 0.46s ease-in-out infinite 0.18s; }
+.ps-card-frame { position: absolute; inset: 0; z-index: 5; pointer-events: none; border: 2px solid var(--line); box-shadow: inset 0 0 24px rgba(0, 0, 0, 0.5); }
+.ps-card-check { position: absolute; top: 11px; right: 11px; z-index: 6; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; color: var(--ink); font-family: var(--font-display); font-size: 14px; box-shadow: 2px 2px 0 #000; }
+.ps-card-body { padding: 14px 16px 16px; flex: 1; display: flex; flex-direction: column; gap: 10px; }
+.ps-card-bio { margin: 0; font-family: var(--font-mono); font-size: 11px; line-height: 1.55; color: #9a98a2; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ps-card-chips { display: flex; align-items: center; gap: 6px; margin-top: auto; flex-wrap: wrap; }
+.ps-card-chips-bar { width: 6px; height: 18px; flex: none; }
+.ps-chip { font-family: var(--font-mono); font-weight: 700; font-size: 9px; letter-spacing: 0.1em; padding: 3px 7px; border: 1.5px solid; }
+
+.ps-add { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 320px; padding: 30px; cursor: pointer; color: #9a98a2; background: #0c0c0f; border: 2px dashed #3f3f48; transition: border-color 0.12s, color 0.12s; }
+.ps-add:hover { border-color: var(--lime); color: var(--lime); }
+.ps-add-plus { font-family: var(--font-display); font-size: 54px; line-height: 1; margin-bottom: 14px; }
+.ps-add-title { font-family: var(--font-display); font-size: 18px; letter-spacing: 0.02em; text-transform: uppercase; }
+.ps-add-note { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.1em; color: var(--ghost-2); margin-top: 10px; text-transform: uppercase; text-align: center; line-height: 1.6; }
+
+.ps-usebar { flex: none; display: flex; align-items: stretch; border-top: 2px solid var(--line); background: var(--ink); }
+.ps-usebar-accent { width: 14px; flex: none; background: var(--acc, var(--lime)); }
+.ps-use-info { padding: 14px 22px; border-right: 2px solid var(--line); display: flex; flex-direction: column; justify-content: center; min-width: 240px; }
+.ps-use-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.16em; color: var(--acc, var(--lime)); margin-bottom: 4px; }
+.ps-use-name { font-family: var(--font-display); font-size: 22px; letter-spacing: -0.01em; text-transform: uppercase; line-height: 1; }
+.ps-use-handle-box { padding: 14px 22px; border-right: 2px solid var(--line); display: flex; flex-direction: column; justify-content: center; }
+.ps-use-sub { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.14em; color: var(--ghost); margin-bottom: 5px; }
+.ps-use-handle { font-family: var(--font-mono); font-weight: 700; font-size: 14px; color: var(--paper); }
+.ps-use-bio { flex: 1; display: flex; align-items: center; padding: 0 22px; min-width: 0; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em; color: var(--ghost); line-height: 1.5; }
+.ps-use-btn { display: flex; align-items: center; gap: 12px; padding: 0 32px; border: 0; border-left: 2px solid var(--acc, var(--lime)); background: var(--acc, var(--lime)); color: var(--ink); cursor: pointer; transition: filter 0.1s; }
+.ps-use-btn:hover { filter: brightness(1.08); }
+.ps-use-btn span:first-child { font-family: var(--font-display); font-size: 22px; }
+.ps-use-btn span:last-child { font-family: var(--font-display); font-size: 19px; letter-spacing: 0.04em; }
+
+/* ---------- CREAR ---------- */
+.ps-crear { flex: 1; min-height: 0; display: flex; }
+.ps-form { flex: 1; min-width: 0; overflow-y: auto; border-right: 2px solid var(--line); }
+.ps-form-inner { padding: 26px 30px; max-width: 620px; }
+.ps-form-head { display: flex; align-items: center; gap: 12px; margin: 6px 0 18px; }
+.ps-form-head:first-child { margin-top: 0; }
+.ps-form-num { font-family: var(--font-display); font-size: 13px; color: var(--lime); }
+.ps-form-htitle { font-family: var(--font-display); font-size: 18px; text-transform: uppercase; letter-spacing: -0.01em; }
+.ps-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em; color: var(--ghost); margin: 0 0 9px; text-transform: uppercase; }
+.ps-input { width: 100%; padding: 13px 15px; border: 2px solid var(--line); background: var(--surface); color: var(--paper); outline: none; margin-bottom: 20px; }
+.ps-input:focus, .ps-textarea:focus { border-color: var(--lime); }
+.ps-input-name { font-family: var(--font-display); font-size: 20px; letter-spacing: -0.01em; text-transform: uppercase; }
+.ps-input-handle { font-family: var(--font-mono); font-weight: 700; font-size: 15px; }
+.ps-textarea { width: 100%; padding: 12px 15px; border: 2px solid var(--line); background: var(--surface); color: #c9c5ce; font-family: var(--font-mono); font-size: 13px; line-height: 1.6; outline: none; resize: none; margin-bottom: 22px; }
+.ps-swatches { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 24px; }
+.ps-swatch { width: 46px; height: 46px; padding: 0; cursor: pointer; position: relative; background: var(--surface); border: 3px solid var(--line); }
+.ps-swatch.on { border-color: var(--paper); box-shadow: 4px 4px 0 #000; }
+.ps-swatch span { position: absolute; inset: 6px; }
+.ps-form-note { margin: 0 0 16px; font-family: var(--font-mono); font-size: 12px; line-height: 1.6; color: #9a98a2; }
+.ps-form-note strong { color: var(--paper); }
+.ps-state-tabs { display: flex; gap: 9px; flex-wrap: wrap; }
+.ps-state-tab { display: flex; align-items: center; gap: 9px; padding: 11px 16px; cursor: pointer; font-family: var(--font-mono); font-weight: 700; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; border: 2px solid var(--line); background: transparent; color: var(--ghost); transition: color 0.1s, border-color 0.1s; }
+.ps-state-tab.on { background: var(--surface); color: var(--paper); box-shadow: 3px 3px 0 #000; }
+.ps-state-dot { width: 10px; height: 10px; flex: none; display: inline-block; }
+
+.ps-preview-pane { width: clamp(340px, 38vw, 460px); flex: none; background: var(--ink-deep); display: flex; flex-direction: column; min-height: 0; }
+.ps-preview-head { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 2px solid var(--line); }
+.ps-preview-title { font-family: var(--font-display); font-size: 14px; text-transform: uppercase; letter-spacing: -0.01em; }
+.ps-preview-btn { display: flex; align-items: center; gap: 7px; padding: 8px 13px; cursor: pointer; font-family: var(--font-mono); font-weight: 700; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; border: 2px solid var(--lime); background: transparent; color: var(--lime); }
+.ps-preview-btn.on { border-color: var(--magenta); color: var(--magenta); }
+.ps-preview-wrap { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 28px 30px; }
+.ps-portrait { width: 100%; max-width: 300px; aspect-ratio: 3/4; position: relative; background: var(--ink); box-shadow: 0 14px 50px rgba(0, 0, 0, 0.6); cursor: pointer; }
+.ps-portrait.drag { outline: 3px dashed var(--lime); outline-offset: -3px; }
+.ps-portrait-glow { position: absolute; inset: 0; z-index: 0; }
+.ps-drop-hint { position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; justify-content: center; gap: 6px; font-family: var(--font-mono); font-weight: 700; font-size: 11px; letter-spacing: 0.14em; color: var(--ghost-2); text-transform: uppercase; text-align: center; padding: 20px; }
+.ps-preview-actions { flex: none; display: flex; align-items: stretch; border-top: 2px solid var(--line); }
+.ps-clear { padding: 16px 20px; border: 0; border-right: 2px solid var(--line); background: transparent; color: var(--ghost); font-family: var(--font-mono); font-weight: 700; font-size: 12px; letter-spacing: 0.12em; cursor: pointer; text-transform: uppercase; transition: color 0.1s, background 0.1s; }
+.ps-clear:hover { color: var(--magenta); background: var(--surface); }
+.ps-save { flex: 1; border: 0; background: var(--lime); color: var(--ink); cursor: pointer; font-family: var(--font-display); font-size: 17px; letter-spacing: 0.03em; display: flex; align-items: center; justify-content: center; gap: 9px; transition: filter 0.1s; }
+.ps-save:hover { filter: brightness(1.06); }
+
+/* toast (reusa la animación pl-ed-toast) */
+.ps-toast { position: fixed; bottom: 34px; left: 50%; transform: translateX(-50%); z-index: 60; background: var(--toast-color, var(--lime)); color: var(--ink); font-family: var(--font-display); font-size: 14px; letter-spacing: 0.02em; padding: 12px 22px; box-shadow: 5px 5px 0 #000; text-transform: uppercase; pointer-events: none; }
+.ps-toast[hidden] { display: none; }

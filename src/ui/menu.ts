@@ -19,6 +19,8 @@ export interface MenuHooks {
   onSync: (song: SongConfig) => void;
   /** El usuario abrió la configuración (⚙ en el START). */
   onConfig: () => void;
+  /** El usuario abrió el gestor de streamers (👥 en el START). */
+  onStreamers: () => void;
 }
 
 export interface MenuApi {
@@ -102,6 +104,7 @@ export function initMenu(hooks: MenuHooks): MenuApi {
       </div>
       <div class="pl-start-foot" id="pl-start-foot"></div>
       <button class="pl-config-link" id="pl-config-link" type="button">⚙ CONFIG</button>
+      <button class="pl-streamers-link" id="pl-streamers-link" type="button">👥 STREAMERS</button>
       <button class="pl-edit-link" id="pl-edit-link" type="button">✎ EDITOR</button>
     </div>`;
   $("pl-start-body").addEventListener("click", () => transitionToSelect());
@@ -112,6 +115,10 @@ export function initMenu(hooks: MenuHooks): MenuApi {
   $("pl-config-link").addEventListener("click", (e) => {
     e.stopPropagation(); // idem: abrir config no debe disparar el "JUGAR"
     hooks.onConfig();
+  });
+  $("pl-streamers-link").addEventListener("click", (e) => {
+    e.stopPropagation(); // idem: abrir streamers no debe disparar el "JUGAR"
+    hooks.onStreamers();
   });
 
   function updateStartFoot(): void {
