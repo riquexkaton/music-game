@@ -34,6 +34,10 @@ export interface WaveModel {
   gameStart: number;
   /** ¿Está fijado el inicio? Si no, no se dibuja el overlay/marcador. */
   gameStartSet: boolean;
+  /** Anclas del sync por 2 marcas (segundos). null = todavía no marcada. Se dibujan
+   *  como líneas cyan mientras dura el sync, para que el usuario VEA dónde palmeó. */
+  anchor0: number | null;
+  anchor1: number | null;
 }
 
 const BEATS_PER_BAR = 4;
@@ -246,6 +250,20 @@ export class EditorWave {
       marker.className = "ple-wave-pending";
       marker.style.left = `${left}%`;
       marker.innerHTML = `<span class="ple-wave-pending-label">INICIO</span>`;
+      this.overlays.appendChild(marker);
+    }
+
+    // --- ANCLAS del sync por 2 marcas (cyan): se ven al palmear ESPACIO ---
+    // anchor0 es la marca más temprana y anchor1 la lejana (main.ts las reordena),
+    // así el "1" cae a la izquierda y el "2" a la derecha en la onda.
+    const anchors: Array<{ sec: number; n: 1 | 2 }> = [];
+    if (m.anchor0 !== null) anchors.push({ sec: m.anchor0, n: 1 });
+    if (m.anchor1 !== null) anchors.push({ sec: m.anchor1, n: 2 });
+    for (const a of anchors) {
+      const marker = document.createElement("div");
+      marker.className = "ple-wave-anchor";
+      marker.style.left = `${this.fractionForSeconds(a.sec) * 100}%`;
+      marker.innerHTML = `<span class="ple-wave-anchor-label">ANCLA ${a.n}</span>`;
       this.overlays.appendChild(marker);
     }
   }

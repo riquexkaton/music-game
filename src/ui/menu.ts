@@ -5,6 +5,7 @@
 import "./pulse.css";
 import type { SongConfig } from "../storage";
 import { createMenuMusic } from "./menu-music";
+import { createUiSfx } from "./ui-sfx";
 
 const ACCENTS = ["#c8ff1e", "#25e0ff", "#ff2e9a", "#ffd021", "#a78bfa", "#ff7847"];
 const ARROW_GLYPHS = ["←", "↑", "→", "↓"];
@@ -32,13 +33,16 @@ export interface MenuApi {
   showPlay: () => void;
   /** Pantalla de resultados (#screen-result). */
   showResult: () => void;
+  /** Apaga las pantallas del menú para que main.ts monte #screen-streamers, MANTENIENDO
+   *  la música del lobby (streamers no tiene audio propio → sigue sonando, sin corte). */
+  showStreamers: () => void;
   /** El acento de la card actualmente seleccionada (para teñir play/result). */
   currentAccent: () => string;
   /** Re-renderiza las cards (p. ej. tras subir una canción). */
   refresh: () => void;
 }
 
-type Screen = "start" | "select" | "game" | "play" | "result";
+type Screen = "start" | "select" | "game" | "play" | "result" | "streamers";
 
 // Lenis (smooth scroll) llega por CDN en index.html. Tipado mínimo + fallback nativo.
 interface LenisLike {
@@ -75,6 +79,8 @@ export function initMenu(hooks: MenuHooks): MenuApi {
   // Música de fondo de los menús: loop independiente del motor (ver menu-music.ts).
   // La prende/apaga setScreen() según la pantalla activa.
   const menuMusic = createMenuMusic("/menu/vamos-a-bailar.mp3");
+  // Efectos de UI: woosh de transición de página + tick al cambiar de canción.
+  const uiSfx = createUiSfx();
 
   // ---------- helpers de datos (siempre reales) ----------
   const songs = (): SongConfig[] => hooks.getSongs();
@@ -140,6 +146,9 @@ export function initMenu(hooks: MenuHooks): MenuApi {
       <div class="pl-select-title">Seleccionar pista</div>
       <div class="pl-grow"></div>
       <div class="pl-select-hints">↑↓ ←→ NAVEGAR · ENTER JUGAR</div>
+      <button class="pl-head-link" id="pl-sel-config" type="button">⚙ CONFIG</button>
+      <button class="pl-head-link" id="pl-sel-streamers" type="button">👥 STREAMERS</button>
+      <button class="pl-head-link" id="pl-sel-editor" type="button">✎ EDITOR</button>
     </div>
     <div class="pl-masonry-wrap" id="pl-scroll">
       <div class="pl-masonry" id="pl-masonry"></div>
@@ -151,6 +160,19 @@ export function initMenu(hooks: MenuHooks): MenuApi {
   $("pl-back").addEventListener("click", (e) => {
     e.stopPropagation();
     showStart();
+  });
+  // Accesos EDITOR / STREAMERS / CONFIG desde el header del SELECT (espejan el START).
+  $("pl-sel-config").addEventListener("click", (e) => {
+    e.stopPropagation();
+    hooks.onConfig();
+  });
+  $("pl-sel-streamers").addEventListener("click", (e) => {
+    e.stopPropagation();
+    hooks.onStreamers();
+  });
+  $("pl-sel-editor").addEventListener("click", (e) => {
+    e.stopPropagation();
+    location.hash = "#editor";
   });
 
   function renderCards(): void {
@@ -225,6 +247,7 @@ export function initMenu(hooks: MenuHooks): MenuApi {
   }
 
   function pick(i: number): void {
+    if (i !== sel) uiSfx.select(); // tick sólo al CAMBIAR de canción (no en re-click)
     sel = i;
     masonry.querySelectorAll<HTMLElement>(".pl-card").forEach((el) => {
       el.classList.toggle("on", Number(el.dataset.idx) === i);
@@ -299,6 +322,7 @@ export function initMenu(hooks: MenuHooks): MenuApi {
 
   // ---------- transición wipe ----------
   function wipe(): void {
+    uiSfx.transition(); // woosh sincronizado con la animación de transición de página
     const el = document.createElement("div");
     el.className = "pl-wipe";
     el.innerHTML = `<div class="pl-wipe-b-layer"></div><div class="pl-wipe-a-layer"><span>PULSE<span class="pl-dot">.</span></span></div>`;
@@ -344,9 +368,9 @@ export function initMenu(hooks: MenuHooks): MenuApi {
   // ---------- router ----------
   function setScreen(s: Screen): void {
     current = s;
-    // Música de menú: suena en START / SELECT / RESULT; se calla en el gameplay
-    // (play → suena la canción del juego) y en el editor/streamers (game → se
-    // audiciona la pista que se está editando). Un solo punto para todo el routing.
+    // Música del lobby: suena en START / SELECT / RESULT / STREAMERS; se calla SÓLO
+    // donde hay otro audio propio: el gameplay (play → la canción del juego) y el
+    // editor (game → se audiciona la pista). Un solo punto para todo el routing.
     if (s === "play" || s === "game") menuMusic.leave();
     else menuMusic.enter();
     startScreen.classList.toggle("hidden", s !== "start");
@@ -380,6 +404,10 @@ export function initMenu(hooks: MenuHooks): MenuApi {
     destroyLenis();
     setScreen("result");
   }
+  function showStreamers(): void {
+    destroyLenis();
+    setScreen("streamers"); // apaga las 5 pantallas del menú; la música del lobby sigue
+  }
   function currentAccent(): string {
     return accentFor(sel);
   }
@@ -390,5 +418,5 @@ export function initMenu(hooks: MenuHooks): MenuApi {
   }
 
   updateStartFoot();
-  return { showStart, showSelect, showGame, showPlay, showResult, currentAccent, refresh };
+  return { showStart, showSelect, showGame, showPlay, showResult, showStreamers, currentAccent, refresh };
 }

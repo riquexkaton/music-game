@@ -1543,7 +1543,7 @@ const streamers = createStreamers(streamersScreen, {
 /** Muestra #screen-streamers: apaga el resto de pantallas y refresca el roster. */
 function showStreamers(): void {
   if (mode !== "idle") stopPlayback();
-  menu.showGame(); // apaga las 5 pantallas del menú
+  menu.showStreamers(); // apaga las pantallas del menú y MANTIENE la música del lobby
   $("screen-game").classList.add("hidden");
   editorScreen.classList.add("hidden");
   streamersScreen.classList.remove("hidden");
@@ -1661,6 +1661,7 @@ function editorStopPlayback(): void {
   edAnchor1 = null;
   edAnchorBars = 0;
   editor?.setPlaying(false);
+  editor?.setSyncLock(false); // se cortó el sync → ocultar el tooltip
 }
 
 /** Lazy-init del pintor de la onda (necesita los nodos que crea editor.ts). */
@@ -1716,6 +1717,8 @@ function editorDrawWave(): void {
     pendingStartBeat: edPendingStartBeat,
     gameStart: gs.gameStart,
     gameStartSet: gs.gameStartSet,
+    anchor0: edAnchor0,
+    anchor1: edAnchor1,
   });
 }
 
@@ -1832,7 +1835,10 @@ async function editorPlayPause(): Promise<void> {
     editor?.toast("NO HAY PISTA", "#ff3b30");
     return;
   }
-  if (edSyncing) return; // durante el sync el transport lo maneja el sync
+  if (edSyncing) {
+    editor?.bumpSyncLock(); // no se puede pausar durante el sync: sacudir el aviso
+    return;
+  }
   if (edPlaying) {
     conductor.pause();
     edWaveTime = conductor.time;
@@ -2015,7 +2021,9 @@ async function editorSyncStart(): Promise<void> {
   edAnchorBars = 0;
   edSeedBpm = edSyncSeed(); // capturamos la semilla ANTES de tocar chart.bpm en vivo
   editor?.setPlaying(true);
+  editor?.setSyncLock(true); // tooltip: durante el sync no se puede pausar
   editorRenderSyncReadout();
+  editorDrawWave(); // limpiar anclas de un intento anterior (arranca sin marcas)
   ensureEditorLoop();
   editor?.toast("PALMEÁ ESPACIO EN UN '1' BIEN MARCADO", "#c8ff1e");
 }
@@ -2029,6 +2037,7 @@ function editorSyncTap(): void {
   if (edAnchor0 === null) {
     edAnchor0 = t;
     editorRenderSyncReadout();
+    editorDrawWave(); // pintar la ANCLA 1 en la onda ni bien se marca
     editor?.toast("MARCA 1 ✓ — AHORA OTRA, LO MÁS LEJOS POSIBLE", "#25e0ff");
     return;
   }

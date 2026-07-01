@@ -211,6 +211,10 @@ export interface EditorApi {
   setMarkMode: (marking: boolean, pendingStart: boolean) => void;
   /** Toast brutalist efímero (texto + color de fondo). */
   toast: (text: string, color?: string) => void;
+  /** Muestra/oculta el tooltip "no se puede pausar durante el sync" (anclado al play). */
+  setSyncLock: (active: boolean) => void;
+  /** Sacude el tooltip del sync-lock (si está visible) cuando el usuario insiste en pausar. */
+  bumpSyncLock: () => void;
   /** El <canvas> de la onda — Fase 2 dibuja el waveform real acá. */
   getCanvas: () => HTMLCanvasElement;
   /** El contenedor de la onda — Fase 2 mide su tamaño y posiciona overlays acá. */
@@ -296,6 +300,12 @@ export function createEditor(root: HTMLElement, hooks: EditorHooks): EditorApi {
               </div>
               <div class="pl-grow"></div>
               <div class="ple-mark-pill" id="ple-mark-pill">CLIC EN LA ONDA = MOVER CABEZAL</div>
+              <!-- tooltip anclado al play: durante el sync no se puede pausar
+                   (ESPACIO marca anclas). Lo prende/apaga setSyncLock desde main.ts. -->
+              <div class="ple-sync-lock" id="ple-sync-lock" hidden>
+                <span class="ple-sync-lock-ico">⏸</span>
+                <span>NO SE PUEDE PAUSAR DURANTE EL SYNC — MARCÁ <kbd class="ple-kbd">ESPACIO</kbd> O CANCELÁ</span>
+              </div>
             </div>
             <!-- wave: <canvas> + overlays (Fase 2 los dibuja/posiciona) -->
             <div class="ple-wave-box" id="ple-wave-box">
@@ -462,6 +472,7 @@ export function createEditor(root: HTMLElement, hooks: EditorHooks): EditorApi {
   const timeEl = $("ple-time");
   const lenTotalEl = $("ple-len-total");
   const markPillEl = $("ple-mark-pill");
+  const syncLockEl = $("ple-sync-lock");
   // wave
   const waveBox = $("ple-wave-box");
   const waveCanvas = $("ple-wave-canvas") as HTMLCanvasElement;
@@ -771,6 +782,20 @@ export function createEditor(root: HTMLElement, hooks: EditorHooks): EditorApi {
     }, 2000);
   }
 
+  // ---------------- tooltip "no se puede pausar durante el sync" ----------------
+  // Vive anclado al botón play. main.ts lo prende en editorSyncStart y lo apaga al
+  // frenar el sync. bumpSyncLock lo sacude si el usuario insiste en tocar play.
+  function setSyncLock(active: boolean): void {
+    syncLockEl.hidden = !active;
+    if (!active) syncLockEl.classList.remove("bump");
+  }
+  function bumpSyncLock(): void {
+    if (syncLockEl.hidden) return;
+    syncLockEl.classList.remove("bump");
+    void syncLockEl.offsetWidth; // reiniciar la animación del shake
+    syncLockEl.classList.add("bump");
+  }
+
   return {
     renderTrackList,
     setSong,
@@ -788,6 +813,8 @@ export function createEditor(root: HTMLElement, hooks: EditorHooks): EditorApi {
     setPlaying,
     setMarkMode,
     toast,
+    setSyncLock,
+    bumpSyncLock,
     getCanvas: () => waveCanvas,
     getWaveBox: () => waveBox,
     currentAccent: () => accent,

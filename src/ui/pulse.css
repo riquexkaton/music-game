@@ -46,7 +46,11 @@ html, body { margin: 0; padding: 0; }
 .pl-edit-link:hover { color: var(--lime); border-color: var(--lime); }
 
 body {
-  min-height: 100vh;
+  /* Fijamos el body al viewport (no min-height, que lo dejaba CRECER con el contenido).
+     Sin esto, en pantallas con mucho contenido —el editor— scrolleaba la página entera
+     y los overflow:auto internos (ej. el listado de pistas) nunca se activaban. */
+  height: 100vh;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   background-color: var(--ink);
@@ -260,6 +264,18 @@ body {
   color: var(--ghost);
   text-transform: uppercase;
 }
+/* Accesos CONFIG / STREAMERS / EDITOR en el header del SELECT (espejan el START).
+   Se estiran a la altura del header (align-items:stretch) con separador a la izquierda. */
+.pl-head-link {
+  flex: none;
+  padding: 0 16px;
+  border: 0; border-left: 2px solid var(--line);
+  background: transparent; color: var(--ghost);
+  font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+  letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer;
+  transition: color 0.16s ease, background 0.16s ease;
+}
+.pl-head-link:hover { color: var(--paper); background: #141418; }
 
 /* masonry horizontal */
 .pl-masonry-wrap {
@@ -1384,6 +1400,7 @@ body {
 /* waveform + transport */
 .ple-wave-section { flex: none; background: var(--ink-deep); border-bottom: 2px solid var(--line); }
 .ple-transport {
+  position: relative; /* ancla del tooltip .ple-sync-lock */
   display: flex; align-items: center; gap: 14px;
   padding: 11px 18px; border-bottom: 2px solid #161620;
 }
@@ -1414,6 +1431,40 @@ body {
   border: 2px solid var(--line); color: var(--ghost);
 }
 .ple-mark-pill.marking { border-color: var(--yellow); color: var(--yellow); }
+
+/* tooltip "no se puede pausar durante el sync": cuelga del transport, sobre la onda,
+   con la flechita apuntando al botón play. Estética Pulse: fondo profundo, borde
+   cyan (color del sync), sombra dura. Se sacude (.bump) si insistís en tocar play. */
+.ple-sync-lock {
+  position: absolute; left: 14px; top: calc(100% - 2px); z-index: 30;
+  display: flex; align-items: center; gap: 9px;
+  max-width: min(560px, 72vw);
+  padding: 9px 13px; background: var(--ink-deep);
+  border: 2px solid var(--cyan); box-shadow: 4px 4px 0 #000;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+  letter-spacing: 0.06em; line-height: 1.35; color: var(--paper);
+  text-transform: uppercase; pointer-events: none;
+  animation: ple-sync-lock-in 0.22s ease both;
+}
+.ple-sync-lock[hidden] { display: none; }
+.ple-sync-lock-ico { flex: none; color: var(--cyan); font-size: 14px; }
+.ple-sync-lock .ple-kbd { padding: 2px 7px; font-size: 10px; border-color: var(--cyan); color: var(--cyan); }
+.ple-sync-lock::after {
+  content: ""; position: absolute; bottom: 100%; left: 24px;
+  border: 7px solid transparent; border-bottom-color: var(--cyan);
+}
+.ple-sync-lock.bump { animation: ple-sync-lock-shake 0.4s ease; }
+@keyframes ple-sync-lock-in {
+  from { opacity: 0; transform: translateY(-7px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes ple-sync-lock-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-5px); }
+  40% { transform: translateX(5px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(3px); }
+}
 
 /* wave box (Fase 2 dibuja la onda en el canvas + posiciona overlays) */
 .ple-wave-box {
@@ -1474,6 +1525,16 @@ body {
 .ple-wave-gamestart-label {
   position: absolute; bottom: 22px; left: 4px;
   font-size: 9px; font-weight: 700; color: var(--magenta);
+  white-space: nowrap; text-shadow: 1px 1px 0 #000;
+}
+/* ◉ ANCLAS del sync por 2 marcas (cyan): se ven mientras palmeás con ESPACIO */
+.ple-wave-anchor {
+  position: absolute; top: 0; bottom: 0; width: 2px;
+  background: var(--cyan); box-shadow: 0 0 10px rgba(37, 224, 255, 0.7); z-index: 3;
+}
+.ple-wave-anchor-label {
+  position: absolute; top: 3px; left: 4px;
+  font-size: 9px; font-weight: 700; color: var(--cyan);
   white-space: nowrap; text-shadow: 1px 1px 0 #000;
 }
 
