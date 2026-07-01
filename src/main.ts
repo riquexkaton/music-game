@@ -28,7 +28,10 @@ import {
 } from "./storage";
 import { guess } from "web-audio-beat-detector";
 import { initMenu } from "./ui/menu";
-import { createGame, type ArrowCellState, type GameApi } from "./ui/game";
+import { createGame, type ArrowCellState, type GameApi, type GameHooks } from "./ui/game";
+import { createGameAlt2 } from "./ui/game-alt2";
+import { createConfig } from "./ui/config";
+import { loadSkin, saveSkin, type GameSkin } from "./settings";
 import { createResult } from "./ui/result";
 import {
   createEditor,
@@ -1416,10 +1419,15 @@ const menu = initMenu({
     selectSong(song);
     location.hash = "#editor"; // dispara route() → openEditor() con el hint de sync
   },
+  // ⚙ CONFIG desde el START: abre el panel de configuración (elegir skin).
+  onConfig: () => config.open(),
 });
 
-// Vista de juego real (#screen-play): se instancia acá (ya existe `menu`).
-game = createGame($("screen-play"), {
+// Vista de juego real (#screen-play). Hay DOS pieles que cumplen el MISMO contrato
+// GameApi: la clásica (createGame) y la "Alt 2 · Streamer" (createGameAlt2, portada de
+// Claude Design). El motor le habla SÓLO por GameApi, así que elegir una u otra es un
+// switch: mountGame lee la skin guardada y monta la fábrica correcta en #screen-play.
+const gameHooks: GameHooks = {
   onToggleMute: () => {
     conductor.setMuted(!conductor.isMuted);
     return conductor.isMuted;
@@ -1429,6 +1437,28 @@ game = createGame($("screen-play"), {
   },
   getFreq: () => conductor.getFrequencyData(),
   getBpm: () => chart.bpm,
+};
+
+/** Monta (o re-monta) la piel del gameplay elegida en #screen-play. */
+function mountGame(skin: GameSkin): void {
+  const root = $("screen-play");
+  if (game) game.stop(); // limpia rAF/timers de la piel anterior antes de reemplazar
+  root.innerHTML = "";
+  root.classList.toggle("pl-a2", skin === "alt2");
+  game = skin === "alt2" ? createGameAlt2(root, gameHooks) : createGame(root, gameHooks);
+}
+
+mountGame(loadSkin());
+
+// Panel de CONFIGURACIÓN (⚙ desde el START): elegir la skin del gameplay. Al cambiar,
+// persistimos y re-montamos la piel — el motor ni se entera (mismo GameApi).
+const config = createConfig({
+  getSkin: loadSkin,
+  onSkinChange: (skin) => {
+    saveSkin(skin);
+    if (mode !== "idle") stopPlayback(); // por las dudas: nunca cambiar en plena partida
+    mountGame(skin);
+  },
 });
 
 // Vista nueva del EDITOR (#screen-editor): se instancia acá (ya existe `menu`).

@@ -32,11 +32,17 @@ const CHAT_PERFECT = [
   "PERFECT!!", "INSANO 🔥", "noooo way", "POGGERS", "crackazo", "sin fallar??", "LIMPIO 💯", "GOD",
   "ESTÁ ON FIRE", "QUE NIVEL", "no falla una", "BUILT DIFFERENT", "imparable 🚀", "humano?? 😳",
   "CLIPEEN ESO", "modo dios", "FULL COMBO?!",
+  "MONSTRUO 🐉", "QUÉ MANITOS 🙌", "esto es ilegal", "RESPETO 🫡", "se la sabe toda",
+  "100% preciso", "lo clipea seguro", "skill cap roto", "qué precisión loco", "OTRO NIVEL",
+  "no le erra una 😤", "leyenda", "el profe llegó",
 ];
 const CHAT_MISS = [
   "nooo", "F", "casi", "auch", "tranqui", "se viene", "ñooo",
   "uy", "F en el chat", "casi casi", "ouch", "se fue 💀", "noo eso era", "rip combo",
   "skill issue 😭", "duele", "concentrate", "naah", "ouf", "perdón??",
+  "jajaja qué fue eso", "se cae se cae 📉", "lo tenías 💀", "ya van varias 👀", "respira hermano",
+  "modo bot activado 🤖", "ctrl+z porfa", "auxilio", "💀💀💀", "se rompió todo",
+  "mi abuela lo hace mejor 😭", "GG combo", "ouch x2", "ya fue esa racha", "concentrate loco",
 ];
 // Ambiente / relleno neutral — el chat respira aunque no pase nada (stream real).
 // Tono NEUTRAL/HONESTO: ni aplaude ni hunde. Es el pool que más se ve (alimenta el
@@ -46,9 +52,12 @@ const CHAT_NEUTRAL = [
   // saludos / entradas
   "hola chat", "primera vez aquí", "buenas 👋", "vine por el algoritmo", "saludos desde 🇦🇷",
   "holaa", "recién llego", "qué onda gente", "buenas buenas",
+  "buenas a todos 🙌", "primer día viendo esto", "llegué tarde?", "holis", "qué tal chat",
   // preguntas / contexto
   "que tema es?", "qué juego es", "pásame el link", "diff?", "le va bien?",
   "alguien más viendo?", "esto es nuevo?", "cuánto lleva jugando?", "qué bpm es esto",
+  "de qué va el stream?", "cómo se juega esto?", "qué dificultad es?", "se puede jugar gratis?",
+  "esto es un editor?", "cómo se llama el juego?", "alguien sabe el tema?", "primer stream que veo así",
   // casual / ambiente
   "sube el volumen", "este beat 🎧", "vamo a ver", "me quedo un rato", "el ritmo te atrapa",
   "👀", "buen tema igual", "qué tranqui esto", "café y stream ☕", "de fondo va perfecto",
@@ -95,10 +104,16 @@ export interface StreamRefs {
   comboNum: HTMLElement;
   mult: HTMLElement;
   comboFlair: HTMLElement;
+  /**
+   * Eje del fill de HYPE: "height" (medidor vertical, default clásico) o "width"
+   * (rail horizontal, como la skin Alt 2). setHype/stop escriben ESTE eje.
+   */
+  hypeAxis?: "width" | "height";
 }
 
 export function createStream(refs: StreamRefs, getBpm: () => number): StreamApi {
   let accent = "#c8ff1e";
+  const hypeAxis = refs.hypeAxis ?? "height"; // clásico: vertical; Alt 2: horizontal
   let running = false;
   let rafId = 0;
   const t0 = performance.now();
@@ -158,7 +173,7 @@ export function createStream(refs: StreamRefs, getBpm: () => number): StreamApi 
   // ---------------- HYPE ----------------
   function setHype(v: number): void {
     hype = Math.max(0, Math.min(100, v));
-    refs.hypeFill.style.height = `${hype}%`;
+    refs.hypeFill.style.setProperty(hypeAxis, `${hype}%`);
     const atMax = hype >= 100;
     refs.hypeFill.classList.toggle("max", atMax);
     refs.hypeFlame.classList.toggle("on", atMax);
@@ -194,8 +209,8 @@ export function createStream(refs: StreamRefs, getBpm: () => number): StreamApi 
     kind === "perfect" ? CHAT_PERFECT : kind === "miss" ? CHAT_MISS : kind === "neutral" ? CHAT_NEUTRAL : CHAT_HIT;
 
   // Cuántos mensajes deja vivos el feed antes de evictar por arriba (los más viejos).
-  // ~5 visibles + 1 de respiro para que una ráfaga no se pise a sí misma.
-  const CHAT_MAX = 6;
+  // ~7 visibles + 1 de respiro para que una RÁFAGA grande (hasta 5) no se pise a sí misma.
+  const CHAT_MAX = 8;
 
   function spawnChat(kind: ChatKind): void {
     const user = pick(CHAT_USERS);
@@ -287,8 +302,9 @@ export function createStream(refs: StreamRefs, getBpm: () => number): StreamApi 
       // cuánto más alto venía el combo roto, más reacciona la multitud (2→4).
       const brokenStreak = combo; // combo ANTES de resetear (game.ts pasa el real).
       setHype(hype * 0.4 - 45); // caída fuerte (≈ -45 y ×0.4): perder duele.
-      const missN = brokenStreak >= 8 ? 4 : brokenStreak >= 3 ? 3 : 2;
-      burstChat("miss", missN); // VARIOS mensajes de decepción, no uno aislado.
+      // mínimo 3 voces hundiéndolo; cuanto más alta venía la racha, más se le tira encima la multitud.
+      const missN = brokenStreak >= 8 ? 5 : brokenStreak >= 3 ? 4 : 3;
+      burstChat("miss", missN); // OLA de burla/decepción, no un mensaje aislado.
       // mult vuelve al piso visual; el número de combo pierde su glow.
       refs.mult.textContent = "×1 PUNTOS";
       refs.mult.style.opacity = "0";
@@ -340,8 +356,8 @@ export function createStream(refs: StreamRefs, getBpm: () => number): StreamApi 
     //  · acierto normal (GOOD, o PERFECT con poco combo) → 1 mensaje, y no en cada nota.
     const isMilestone = combo > 0 && combo % 5 === 0;
     if (isPerfect && (combo >= 5 || isMilestone)) {
-      burstChat("perfect", combo >= 10 ? 3 : 2); // euforia: la racha lo amerita.
-    } else if (Math.random() < 0.45 + h * 0.45) {
+      burstChat("perfect", combo >= 10 ? 4 : 3); // OLA de euforia: la racha lo amerita.
+    } else if (Math.random() < 0.55 + h * 0.4) {
       spawnChat("hit"); // acierto común: un grito suelto, sin saturar.
     }
 
@@ -436,9 +452,16 @@ export function createStream(refs: StreamRefs, getBpm: () => number): StreamApi 
         // zona media: mayormente neutral, con algún positivo aislado (sin euforia).
         spawnChat(Math.random() < 0.3 ? "hit" : "neutral");
         if (Math.random() < 0.4) spawnChat("neutral"); // 2º ocasional para poblar el feed.
+      } else if (missStreak >= 2) {
+        // racha de MISS REAL: la multitud se le tira encima de forma CONTINUA (no solo
+        // en el instante del fallo). Honesto: está gateado por missStreak real → la
+        // está pifiando de verdad. Mezcla burla con algún neutral para que respire.
+        spawnChat("miss");
+        if (Math.random() < 0.6) spawnChat("miss");
+        if (Math.random() < 0.35) spawnChat("neutral");
       } else {
-        // arranque / racha de fallos: SOLO charla neutral, pero CONSTANTE (un chat real
-        // no se calla porque al jugador le vaya mal). Siempre 1, a veces 2.
+        // arranque / juego flojo SIN racha de fallos: charla neutral CONSTANTE (un chat
+        // real no se calla). Siempre 1, a veces 2.
         spawnChat("neutral");
         if (Math.random() < 0.4) spawnChat("neutral");
       }
@@ -468,7 +491,7 @@ export function createStream(refs: StreamRefs, getBpm: () => number): StreamApi 
     refs.alertLayer.innerHTML = "";
     refs.chatLayer.innerHTML = "";
     refs.comboFlair.innerHTML = "";
-    refs.hypeFill.style.height = "0%";
+    refs.hypeFill.style.setProperty(hypeAxis, "0%");
     refs.hypeFill.classList.remove("max");
     refs.hypeFlame.classList.remove("on");
     refs.hypeFlame.style.transform = "scale(1)";

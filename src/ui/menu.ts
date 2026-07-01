@@ -17,6 +17,8 @@ export interface MenuHooks {
   onPlay: (song: SongConfig) => void;
   /** El usuario quiere sincronizar una canción bloqueada: llevarlo al editor. */
   onSync: (song: SongConfig) => void;
+  /** El usuario abrió la configuración (⚙ en el START). */
+  onConfig: () => void;
 }
 
 export interface MenuApi {
@@ -99,12 +101,17 @@ export function initMenu(hooks: MenuHooks): MenuApi {
         <div class="pl-start-hint">CLICK O PRESIONÁ <span class="pl-kbd">ENTER</span> <span class="pl-cursor">_</span></div>
       </div>
       <div class="pl-start-foot" id="pl-start-foot"></div>
+      <button class="pl-config-link" id="pl-config-link" type="button">⚙ CONFIG</button>
       <button class="pl-edit-link" id="pl-edit-link" type="button">✎ EDITOR</button>
     </div>`;
   $("pl-start-body").addEventListener("click", () => transitionToSelect());
   $("pl-edit-link").addEventListener("click", (e) => {
     e.stopPropagation(); // que no dispare el "JUGAR" del cuerpo
     location.hash = "#editor";
+  });
+  $("pl-config-link").addEventListener("click", (e) => {
+    e.stopPropagation(); // idem: abrir config no debe disparar el "JUGAR"
+    hooks.onConfig();
   });
 
   function updateStartFoot(): void {

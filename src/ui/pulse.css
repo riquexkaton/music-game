@@ -755,7 +755,7 @@ body {
 /* --- character panel: OVERLAY flotante (esquina inferior derecha) --- */
 .pl-char-panel {
   position: absolute; right: 20px; bottom: 20px; z-index: 6;
-  width: clamp(180px, 16vw, 240px); height: clamp(150px, 21vh, 210px);
+  width: clamp(212px, 19vw, 288px); height: clamp(178px, 25vh, 252px);
   overflow: visible; pointer-events: none;
   transition: transform 0.26s ease;
 }
@@ -1075,22 +1075,27 @@ body {
    desvanecen (máscara superior) hasta evictarse. ~5–6 filas visibles. */
 .pl-chat-layer {
   position: absolute; left: 26px; bottom: 18px; z-index: 2;
-  width: clamp(190px, 21vw, 280px);
-  display: flex; flex-direction: column; justify-content: flex-end; gap: 4px;
-  pointer-events: none; max-height: 46%; overflow: hidden;
+  width: clamp(210px, 22vw, 300px);
+  display: flex; flex-direction: column; justify-content: flex-end; gap: 5px;
+  pointer-events: none; max-height: 50%; overflow: hidden;
   /* fundido superior: las filas viejas se diluyen al subir, como un chat que scrollea. */
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 26%, #000 100%);
   mask-image: linear-gradient(to bottom, transparent 0, #000 26%, #000 100%);
 }
+/* Cada fila lleva su PROPIO fondo oscuro + leve blur: así el chat se despega del fondo
+   ruidoso (anillos/grilla/onda) y SIEMPRE se lee, sin importar qué tenga detrás. */
 .pl-chat-row {
-  display: flex; gap: 6px; align-items: baseline;
-  font-family: var(--font-mono); font-size: 12px; line-height: 1.25;
-  text-shadow: 1px 1px 0 #000; overflow: hidden;
+  display: flex; gap: 6px; align-items: baseline; align-self: flex-start; max-width: 100%;
+  font-family: var(--font-mono); font-size: 13px; line-height: 1.3;
+  padding: 3px 9px; background: rgba(8, 8, 10, 0.66);
+  -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
+  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.45);
+  text-shadow: 1px 1px 0 #000, 0 0 2px #000; overflow: hidden;
   animation: pl-chat-in 0.22s ease both;
 }
 .pl-chat-row.out { animation: pl-chat-out 0.4s ease forwards; }
 .pl-chat-user { font-weight: 700; white-space: nowrap; }
-.pl-chat-msg { color: #c9c5ce; word-break: break-word; }
+.pl-chat-msg { color: #e6e3ea; word-break: break-word; }
 
 /* multiplicador (multRef, L284), debajo del combo */
 .pl-mult {
@@ -1714,3 +1719,145 @@ body {
   86% { opacity: 1; }
   100% { transform: translate(-50%, -10px); opacity: 0; }
 }
+
+/* ============================================================================
+   CONFIG (⚙ desde el START) — link + modal de configuración (elegir skin).
+   ============================================================================ */
+/* acceso discreto a CONFIG desde el START (esquina inferior IZQUIERDA, espeja EDITOR) */
+.pl-config-link {
+  position: absolute; bottom: 24px; left: 28px; z-index: 5;
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em;
+  color: var(--paper-dim); background: transparent;
+  border: 1.5px solid var(--line); padding: 7px 12px; cursor: pointer;
+  transition: color 0.18s ease, border-color 0.18s ease;
+}
+.pl-config-link:hover { color: var(--cyan); border-color: var(--cyan); }
+
+@keyframes pl-cfg-fade { 0% { opacity: 0; } 100% { opacity: 1; } }
+@keyframes pl-cfg-pop {
+  0% { transform: translateY(14px) scale(0.97); opacity: 0; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+.pl-cfg-backdrop {
+  position: fixed; inset: 0; z-index: 80;
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+  background: rgba(6, 6, 8, 0.72);
+  -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+  animation: pl-cfg-fade 0.18s ease both;
+}
+.pl-cfg-backdrop[hidden] { display: none; }
+.pl-cfg-modal {
+  width: min(92vw, 560px); background: var(--ink);
+  border: 3px solid var(--paper); box-shadow: 8px 8px 0 #000;
+  animation: pl-cfg-pop 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.pl-cfg-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px; border-bottom: 2px solid var(--line);
+}
+.pl-cfg-title { font-family: var(--font-display); font-size: 18px; letter-spacing: -0.01em; text-transform: uppercase; }
+.pl-cfg-close {
+  width: 30px; height: 30px; border: 2px solid var(--line); background: transparent;
+  color: var(--ghost); cursor: pointer; font-size: 13px; transition: border-color 0.12s, color 0.12s;
+}
+.pl-cfg-close:hover { border-color: var(--magenta); color: var(--magenta); }
+.pl-cfg-label {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.2em; color: var(--ghost);
+  text-transform: uppercase; padding: 18px 20px 0;
+}
+.pl-cfg-skins { display: grid; gap: 12px; padding: 12px 20px; }
+.pl-cfg-skin {
+  text-align: left; width: 100%; cursor: pointer; font-family: var(--font-mono); color: var(--paper);
+  background: var(--surface-2); border: 2px solid var(--line-soft);
+  padding: 14px 16px; transition: border-color 0.12s, box-shadow 0.12s, transform 0.12s;
+}
+.pl-cfg-skin:hover { border-color: #3a3a44; }
+.pl-cfg-skin.on { border-color: var(--lime); box-shadow: 5px 5px 0 #000; transform: translate(-1px, -1px); }
+.pl-cfg-skin-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.pl-cfg-skin-name { font-family: var(--font-display); font-size: 16px; letter-spacing: -0.01em; text-transform: uppercase; }
+.pl-cfg-skin-tag { font-size: 9px; letter-spacing: 0.14em; color: var(--ghost); border: 1.5px solid var(--line); padding: 3px 7px; text-transform: uppercase; white-space: nowrap; }
+.pl-cfg-skin-desc { font-size: 11px; line-height: 1.55; color: var(--paper-dim); }
+.pl-cfg-skin-mark { margin-top: 10px; font-weight: 700; font-size: 10px; letter-spacing: 0.14em; color: var(--ghost-2); text-transform: uppercase; }
+.pl-cfg-skin.on .pl-cfg-skin-mark { color: var(--lime); }
+.pl-cfg-foot { padding: 4px 20px 18px; font-size: 10px; letter-spacing: 0.08em; color: var(--ghost-2); text-transform: uppercase; }
+
+/* ============================================================================
+   GAMEPLAY ALT 2 · STREAMER (#screen-play.pl-a2)
+   Piel alternativa portada de Claude Design ("Pulse Game Alt 2", variante C · OVERLAY).
+   Reutiliza los módulos e ítems decorativos (chat/emotes/keycaps/timing/score) por sus
+   clases GLOBALES; acá va sólo el LAYOUT propio + los contenedores reactivos reposicionados.
+   ============================================================================ */
+#screen-play.pl-a2 { background: #060608; }
+
+/* top control bar */
+.pl-a2-topbar { flex: none; display: flex; align-items: stretch; border-bottom: 2px solid var(--line); background: var(--ink); }
+.pl-a2-brand { padding: 13px 20px; border-right: 2px solid var(--line); display: flex; align-items: center; font-family: var(--font-display); font-size: 19px; letter-spacing: -0.03em; text-transform: uppercase; line-height: 1; }
+.pl-a2-brand span { color: #e0245e; }
+.pl-a2-song { display: flex; align-items: center; gap: 9px; padding: 0 20px; border-right: 2px solid var(--line); min-width: 0; }
+.pl-a2-song-dot { width: 11px; height: 11px; flex: none; background: var(--accent); }
+.pl-a2-song-title { font-family: var(--font-display); font-size: 15px; text-transform: uppercase; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pl-a2-song-bpm { font-family: var(--font-display); font-size: 15px; color: var(--accent); }
+.pl-a2-song-unit { font-family: var(--font-mono); font-size: 9px; color: var(--ghost); letter-spacing: 0.1em; white-space: nowrap; }
+.pl-a2 .pl-grow { flex: 1; }
+.pl-a2-btn { font-family: var(--font-mono); font-weight: 700; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--paper-dim); background: transparent; border: 0; border-left: 2px solid var(--line); border-radius: 0; padding: 0 18px; cursor: pointer; transition: color 0.12s, background 0.12s; }
+.pl-a2-btn:hover { color: var(--paper); background: var(--surface); }
+.pl-a2-btn.muted { color: var(--ghost-2); }
+.pl-a2-exit:hover { color: var(--magenta); background: transparent; }
+
+/* progress */
+.pl-a2-progress { flex: none; height: 4px; background: var(--surface); }
+.pl-a2-progress > div { height: 100%; width: 0%; background: var(--accent); transition: width 0.4s linear; }
+
+/* field */
+.pl-a2-field { flex: 1; position: relative; overflow: hidden; min-height: 0; background: #060608; isolation: isolate; }
+.pl-a2-vignette { position: absolute; inset: 0; z-index: 1; pointer-events: none; background: radial-gradient(120% 90% at 50% 36%, transparent 36%, rgba(6, 6, 8, 0.7) 100%); }
+.pl-a2-edge { position: absolute; inset: 0; z-index: 2; pointer-events: none; opacity: 0.22; }
+.pl-a2-edge span { position: absolute; left: 0; right: 0; height: 4px; background: var(--accent); box-shadow: 0 0 16px var(--accent); }
+.pl-a2-edge span:first-child { top: 0; }
+.pl-a2-edge span:last-child { bottom: 0; }
+
+/* chat reubicado (reusa .pl-chat-layer/.pl-chat-row globales) */
+.pl-a2-chat { left: 44px; bottom: 22px; width: min(38%, 440px); max-height: 26%; z-index: 6; }
+
+/* hype rail HORIZONTAL (arriba) — stream.ts escribe width (hypeAxis:"width") */
+.pl-a2-hype-rail { position: absolute; top: 0; left: 0; right: 0; height: 8px; z-index: 5; background: var(--ink); border-bottom: 1px solid #1c1c22; overflow: hidden; }
+.pl-a2-hype-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #25e0ff, #ffd021 55%, #ff3b6b); box-shadow: 0 0 14px rgba(255, 208, 33, 0.6); transition: width 0.28s cubic-bezier(0.3, 0.8, 0.3, 1); }
+.pl-a2-hype-fill.max { animation: pl-hype-flash 0.5s ease-in-out infinite; }
+.pl-a2-hype-flame { position: absolute; top: 12px; right: 14px; z-index: 6; font-size: 18px; opacity: 0; transition: opacity 0.25s ease; filter: drop-shadow(0 0 8px #ff7847); pointer-events: none; }
+.pl-a2-hype-flame.on { opacity: 1; animation: pl-flame-wobble 0.6s ease-in-out infinite; }
+
+/* cámara del streamer (derecha) — el stack lo puebla character.ts (.pl-char-img) */
+.pl-a2-cam { position: absolute; right: 0; top: 8px; bottom: 0; width: 46%; z-index: 3; pointer-events: none; overflow: hidden; }
+.pl-a2-cam-glow { position: absolute; inset: 0; background: radial-gradient(70% 60% at 64% 36%, rgba(200, 255, 30, 0.28) 0%, transparent 64%); }
+.pl-a2-cam-stack { position: absolute; inset: 0; }
+.pl-a2-cam-scan { position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.018) 0 2px, transparent 2px 9px); }
+.pl-a2-cam-maskL { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(90deg, #060608 0%, rgba(6, 6, 8, 0.2) 22%, transparent 46%); }
+.pl-a2-cam-maskB { position: absolute; left: 0; right: 0; bottom: 0; height: 38%; pointer-events: none; background: linear-gradient(0deg, rgba(6, 6, 8, 0.85), transparent); }
+.pl-a2-cam-lower { position: absolute; left: 8%; bottom: 22px; z-index: 4; display: flex; flex-direction: column; gap: 4px; }
+.pl-a2-cam-handle { display: flex; align-items: center; gap: 8px; }
+.pl-a2-cam-chip { width: 20px; height: 20px; flex: none; background: var(--accent); display: flex; align-items: center; justify-content: center; font-family: var(--font-display); font-size: 12px; color: var(--ink); box-shadow: 2px 2px 0 #000; }
+.pl-a2-cam-name { font-family: var(--font-display); font-size: clamp(16px, 1.7vw, 20px); letter-spacing: -0.01em; color: var(--paper); text-shadow: 2px 2px 0 #000; }
+.pl-a2-cam-expr { font-family: var(--font-display); font-size: clamp(20px, 2.4vw, 30px); letter-spacing: -0.02em; color: var(--accent); text-transform: uppercase; text-shadow: 3px 3px 0 #000; transition: color 0.2s; }
+
+/* LIVE + espectadores (arriba izquierda) */
+.pl-a2-live { position: absolute; top: 22px; left: 24px; z-index: 6; display: flex; align-items: center; gap: 8px; }
+.pl-a2-live-badge { display: flex; align-items: center; gap: 6px; background: #e0245e; padding: 5px 11px 5px 9px; box-shadow: 2px 2px 0 #000; font-family: var(--font-mono); font-weight: 700; font-size: 11px; letter-spacing: 0.18em; color: #fff; }
+.pl-a2-live-dot { width: 8px; height: 8px; border-radius: 50%; background: #fff; display: inline-block; animation: pl-beat-core 1.1s ease-in-out infinite; }
+.pl-a2-viewers { display: flex; align-items: center; gap: 5px; background: rgba(7, 7, 8, 0.72); padding: 5px 10px; border: 1px solid var(--line); font-family: var(--font-mono); font-weight: 700; font-size: 11px; letter-spacing: 0.08em; color: var(--paper); }
+.pl-a2-viewers-dot { color: #ff3b6b; font-size: 12px; line-height: 1; }
+
+/* columna HUD (izquierda-centro) */
+.pl-a2-hud { position: absolute; left: 44px; right: 42%; top: 92px; bottom: 22%; z-index: 4; display: flex; flex-direction: column; pointer-events: none; }
+.pl-a2-hud-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.pl-a2-best-wrap { text-align: right; }
+.pl-a2-hud-label { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.2em; color: var(--ghost); text-transform: uppercase; margin-bottom: 2px; }
+.pl-a2-combo { font-family: var(--font-display); font-size: clamp(56px, 8vw, 118px); line-height: 0.82; letter-spacing: -0.05em; color: var(--accent); text-shadow: 5px 5px 0 #000; transform-origin: left center; transition: transform 0.12s ease, filter 0.2s ease; }
+.pl-a2-best { font-family: var(--font-display); font-size: clamp(28px, 3.4vw, 46px); line-height: 0.86; color: var(--lime); text-shadow: 3px 3px 0 #000; }
+.pl-a2-x { font-size: 0.45em; }
+.pl-a2-center { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; gap: 18px; min-height: 0; width: 100%; }
+.pl-a2-center .pl-judg { align-items: flex-start; text-align: left; height: auto; min-height: 110px; }
+.pl-a2-center .pl-judg-stamp { align-items: flex-start; }
+.pl-a2-center .pl-break { align-items: flex-start; }
+.pl-a2-center .pl-arrows-row { justify-content: flex-start; }
+.pl-a2-center .pl-timing { width: 100%; max-width: 560px; }
+.pl-a2-center .pl-score { justify-content: flex-start; }
