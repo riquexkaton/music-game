@@ -934,7 +934,15 @@ function leavePlay(): void {
 }
 
 // ---------------- INPUT ----------------
+/** True si el foco está en un campo de texto: ahí las teclas del juego no deben interceptar. */
+function isTypingTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el) return false;
+  return el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable;
+}
+
 window.addEventListener("keydown", (e) => {
+  if (isTypingTarget(e.target)) return;
   // ESC durante el juego real (#screen-play) = "ESC · SALIR": volver (editor o SELECT).
   if (e.code === "Escape" && mode === "playing" && runnerView === "play") {
     e.preventDefault();
